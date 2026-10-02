@@ -1,11 +1,18 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   calculateAll, 
   TrackInputs, 
   FullCalculationResult 
 } from '@/lib/calculator';
+import { 
+  CurrencyItem, 
+  MAX_CURRENCIES, 
+  STORAGE_KEY_CURRENCIES, 
+  STORAGE_KEY_DEFAULTS 
+} from '@/types/currency';
+import { CurrencyDashboard } from '@/components/CurrencyDashboard';
 import { FloatingContainer } from '@/components/FloatingContainer';
 import { TradeDataSection } from '@/components/TradeDataSection';
 import { BreakEvenSection } from '@/components/BreakEvenSection';
@@ -15,14 +22,12 @@ import { WorkspaceBackground } from '@/components/WorkspaceBackground';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { WindowMode } from '@/components/WindowHeader';
 
-const STORAGE_KEY_DEFAULTS = 'price_calc_v0_defaults';
-
 export default function CalculatorPage() {
-  // Window State
+  // Window State for Calculator
   const [windowMode, setWindowMode] = useState<WindowMode>('normal');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Default fee settings from localStorage (initialized with blanks for consistent SSR hydration)
+  // Default fee settings from localStorage
   const [defaultFees, setDefaultFees] = useState<DefaultFeeSettings>({
     entryFeePercent: '',
     exitFeePercent: '',
@@ -30,41 +35,163 @@ export default function CalculatorPage() {
     exitFeeFixed: '',
   });
 
-  // Base Trade Inputs (always start empty each session)
-  const [entryPrice, setEntryPrice] = useState<string>('');
-  const [tradeAmount, setTradeAmount] = useState<string>('');
+  // Currencies list (max 10)
+  const [currencies, setCurrencies] = useState<CurrencyItem[]>([]);
+  // Currently active currency ID (null = showing Currency Dashboard)
+  const [activeCurrencyId, setActiveCurrencyId] = useState<string | null>(null);
 
-  // Cost Inputs
-  const [entryFeePercent, setEntryFeePercent] = useState<string>('');
-  const [exitFeePercent, setExitFeePercent] = useState<string>('');
-  const [entryFeeFixed, setEntryFeeFixed] = useState<string>('');
-  const [exitFeeFixed, setExitFeeFixed] = useState<string>('');
-
-  // Test Prices: Starts with exactly 1 empty field ("سعر الاختبار 1"), max 5
-  const [testPrices, setTestPrices] = useState<string[]>(['']);
-
-  // Load saved default fees asynchronously after hydration completes
+  // Load saved default fees and currencies asynchronously after hydration completes
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
-        const saved = localStorage.getItem(STORAGE_KEY_DEFAULTS);
-        if (saved) {
-          const parsed: DefaultFeeSettings = JSON.parse(saved);
-          setDefaultFees(parsed);
-          if (parsed.entryFeePercent) setEntryFeePercent(parsed.entryFeePercent);
-          if (parsed.exitFeePercent) setExitFeePercent(parsed.exitFeePercent);
-          if (parsed.entryFeeFixed) setEntryFeeFixed(parsed.entryFeeFixed);
-          if (parsed.exitFeeFixed) setExitFeeFixed(parsed.exitFeeFixed);
+        // Load default fees
+        const savedDefaults = localStorage.getItem(STORAGE_KEY_DEFAULTS);
+        if (savedDefaults) {
+          setDefaultFees(JSON.parse(savedDefaults));
+        }
+
+        // Load currencies
+        const savedCurrencies = localStorage.getItem(STORAGE_KEY_CURRENCIES);
+        if (savedCurrencies) {
+          const parsed: CurrencyItem[] = JSON.parse(savedCurrencies);
+          if (Array.isArray(parsed)) {
+            setCurrencies(parsed.slice(0, MAX_CURRENCIES));
+          }
         }
       } catch {
-        // Ignore
+        // Ignore storage errors in restricted contexts
       }
     }, 0);
 
     return () => clearTimeout(timer);
   }, []);
 
+  // Helper to persist currencies
+  const persistCurrencies = useCallback((items: CurrencyItem[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY_CURRENCIES, JSON.stringify(items));
+    } catch {
+      // Ignore
+    }
+  }, []);
 
+  // Add currency (max 10)
+  const handleAddCurrency = (name: string) => {
+    if (currencies.length >= MAX_CURRENCIES) return;
+
+    const newCurrency: CurrencyItem = {
+      id: `curr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: name.trim().toUpperCase(),
+      createdAt: Date.now(),
+      entryPrice: '',
+      tradeAmount: '',
+      entryFeePercent: defaultFees.entryFeePercent || '',
+      exitFeePercent: defaultFees.exitFeePercent || '',
+      entryFeeFixed: defaultFees.entryFeeFixed || '',
+      exitFeeFixed: defaultFees.exitFeeFixed || '',
+      testPrices: [''],
+    };
+
+    const updated = [...currencies, newCurrency];
+    setCurrencies(updated);
+    persistCurrencies(updated);
+    // Directly open the newly added currency calculator
+    setActiveCurrencyId(newCurrency.id);
+  };
+
+  // Delete currency
+  const handleDeleteCurrency = (id: string) => {
+    const updated = currencies.filter((c) => c.id !== id);
+    setCurrencies(updated);
+    persistCurrencies(updated);
+    if (activeCurrencyId === id) {
+      setActiveCurrencyId(null);
+    }
+  };
+
+  // Active currency object
+  const activeCurrency = useMemo(() => {
+    if (!activeCurrencyId) return null;
+    return currencies.find((c) => c.id === activeCurrencyId) || null;
+  }, [currencies, activeCurrencyId]);
+
+  // Update fields of the currently active currency
+  const updateActiveCurrency = useCallback((fields: Partial<CurrencyItem>) => {
+    if (!activeCurrencyId) return;
+
+    setCurrencies((prev) => {
+      const next = prev.map((c) => {
+        if (c.id === activeCurrencyId) {
+          return { ...c, ...fields };
+        }
+        return c;
+      });
+      persistCurrencies(next);
+      return next;
+    });
+  }, [activeCurrencyId, persistCurrencies]);
+
+  // Reset inputs for the active currency only
+  const handleResetActiveCurrency = () => {
+    if (!activeCurrencyId) return;
+    updateActiveCurrency({
+      entryPrice: '',
+      tradeAmount: '',
+      entryFeePercent: defaultFees.entryFeePercent || '',
+      exitFeePercent: defaultFees.exitFeePercent || '',
+      entryFeeFixed: defaultFees.entryFeeFixed || '',
+      exitFeeFixed: defaultFees.exitFeeFixed || '',
+      testPrices: [''],
+    });
+  };
+
+  // Test prices handlers for active currency (max 5)
+  const handleAddTestPrice = () => {
+    if (!activeCurrency) return;
+    if (activeCurrency.testPrices.length < 5) {
+      updateActiveCurrency({
+        testPrices: [...activeCurrency.testPrices, ''],
+      });
+    }
+  };
+
+  const handleRemoveTestPrice = (index: number) => {
+    if (!activeCurrency) return;
+    if (activeCurrency.testPrices.length > 1) {
+      const updated = activeCurrency.testPrices.filter((_, i) => i !== index);
+      updateActiveCurrency({ testPrices: updated });
+    } else {
+      updateActiveCurrency({ testPrices: [''] });
+    }
+  };
+
+  const handleChangeTestPrice = (index: number, val: string) => {
+    if (!activeCurrency) return;
+    const updated = [...activeCurrency.testPrices];
+    updated[index] = val;
+    updateActiveCurrency({ testPrices: updated });
+  };
+
+  // Calculation results for active currency
+  const calculationResult: FullCalculationResult = useMemo(() => {
+    if (!activeCurrency) {
+      return {
+        hasValidBaseInputs: false,
+        percentTrack: { hasTrack: false, isValid: false, quantity: 0, breakEvenPrice: 0, testResults: [] },
+        fixedTrack: { hasTrack: false, isValid: false, quantity: 0, breakEvenPrice: 0, testResults: [] },
+      };
+    }
+
+    const inputs: TrackInputs = {
+      entryPrice: activeCurrency.entryPrice,
+      tradeAmount: activeCurrency.tradeAmount,
+      entryFeePercent: activeCurrency.entryFeePercent,
+      exitFeePercent: activeCurrency.exitFeePercent,
+      entryFeeFixed: activeCurrency.entryFeeFixed,
+      exitFeeFixed: activeCurrency.exitFeeFixed,
+    };
+    return calculateAll(inputs, activeCurrency.testPrices);
+  }, [activeCurrency]);
 
   // Save or clear default fees
   const handleSaveDefaults = (newDefaults: DefaultFeeSettings) => {
@@ -72,7 +199,7 @@ export default function CalculatorPage() {
     try {
       localStorage.setItem(STORAGE_KEY_DEFAULTS, JSON.stringify(newDefaults));
     } catch {
-      // Ignore storage error
+      // Ignore
     }
   };
 
@@ -86,65 +213,9 @@ export default function CalculatorPage() {
     try {
       localStorage.removeItem(STORAGE_KEY_DEFAULTS);
     } catch {
-      // Ignore storage error
+      // Ignore
     }
   };
-
-  // Reset inputs
-  const handleReset = () => {
-    setEntryPrice('');
-    setTradeAmount('');
-    setTestPrices(['']);
-    // Reset costs to saved defaults or blank
-    setEntryFeePercent(defaultFees.entryFeePercent || '');
-    setExitFeePercent(defaultFees.exitFeePercent || '');
-    setEntryFeeFixed(defaultFees.entryFeeFixed || '');
-    setExitFeeFixed(defaultFees.exitFeeFixed || '');
-  };
-
-  // Test prices handlers (max 5)
-  const handleAddTestPrice = () => {
-    if (testPrices.length < 5) {
-      setTestPrices([...testPrices, '']);
-    }
-  };
-
-  const handleRemoveTestPrice = (index: number) => {
-    if (testPrices.length > 1) {
-      const updated = testPrices.filter((_, i) => i !== index);
-      setTestPrices(updated);
-    } else {
-      // If only 1, clear its value
-      setTestPrices(['']);
-    }
-  };
-
-  const handleChangeTestPrice = (index: number, val: string) => {
-    const updated = [...testPrices];
-    updated[index] = val;
-    setTestPrices(updated);
-  };
-
-  // Perform calculations
-  const calculationResult: FullCalculationResult = useMemo(() => {
-    const inputs: TrackInputs = {
-      entryPrice,
-      tradeAmount,
-      entryFeePercent,
-      exitFeePercent,
-      entryFeeFixed,
-      exitFeeFixed,
-    };
-    return calculateAll(inputs, testPrices);
-  }, [
-    entryPrice,
-    tradeAmount,
-    entryFeePercent,
-    exitFeePercent,
-    entryFeeFixed,
-    exitFeeFixed,
-    testPrices,
-  ]);
 
   const hasDefaultsSaved = Boolean(
     defaultFees.entryFeePercent ||
@@ -154,65 +225,80 @@ export default function CalculatorPage() {
   );
 
   return (
-    <main className="relative min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col justify-start sm:justify-center items-center p-3 sm:p-6 overflow-x-hidden">
+    <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 overflow-x-hidden transition-colors">
       {/* Background Ambience and Guide */}
       <WorkspaceBackground 
-        mode={windowMode}
+        mode={activeCurrencyId ? windowMode : 'normal'}
         onSetMode={setWindowMode}
       />
 
       {/* Offline Status Toast */}
       <OfflineIndicator />
 
-      {/* Floating or Centered Calculator Container */}
+      {/* MAIN VIEW: Currency Dashboard OR Active Currency Calculator */}
       <div className="relative z-10 w-full flex justify-center py-2">
-        <FloatingContainer
-          mode={windowMode}
-          onSetMode={setWindowMode}
-          onReset={handleReset}
-          onToggleSettings={() => setIsSettingsOpen(true)}
-          hasDefaultsSaved={hasDefaultsSaved}
-          percentTrack={calculationResult.percentTrack}
-          fixedTrack={calculationResult.fixedTrack}
-        >
-          {/* Section 1: Trade Data (بيانات الصفقة) */}
-          <TradeDataSection
-            entryPrice={entryPrice}
-            onChangeEntryPrice={setEntryPrice}
-            tradeAmount={tradeAmount}
-            onChangeTradeAmount={setTradeAmount}
-            entryFeePercent={entryFeePercent}
-            onChangeEntryFeePercent={setEntryFeePercent}
-            exitFeePercent={exitFeePercent}
-            onChangeExitFeePercent={setExitFeePercent}
-            entryFeeFixed={entryFeeFixed}
-            onChangeEntryFeeFixed={setEntryFeeFixed}
-            exitFeeFixed={exitFeeFixed}
-            onChangeExitFeeFixed={setExitFeeFixed}
-            errorMessage={
-              !calculationResult.hasValidBaseInputs && (entryPrice || tradeAmount)
-                ? calculationResult.baseErrorMessage
-                : undefined
-            }
+        {!activeCurrencyId || !activeCurrency ? (
+          /* View 1: Currency Dashboard (لوحة العملات) */
+          <CurrencyDashboard
+            currencies={currencies}
+            onSelectCurrency={(id) => setActiveCurrencyId(id)}
+            onAddCurrency={handleAddCurrency}
+            onDeleteCurrency={handleDeleteCurrency}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            hasDefaultsSaved={hasDefaultsSaved}
           />
-
-          {/* Section 2: Break-Even Price (سعر التعادل) */}
-          <BreakEvenSection
-            hasValidBase={calculationResult.hasValidBaseInputs}
+        ) : (
+          /* View 2: Full Calculator for the Active Currency (حاسبة العملة المحددة) */
+          <FloatingContainer
+            mode={windowMode}
+            onSetMode={setWindowMode}
+            onReset={handleResetActiveCurrency}
+            onToggleSettings={() => setIsSettingsOpen(true)}
+            hasDefaultsSaved={hasDefaultsSaved}
+            currencyName={activeCurrency.name}
+            onBackToDashboard={() => setActiveCurrencyId(null)}
             percentTrack={calculationResult.percentTrack}
             fixedTrack={calculationResult.fixedTrack}
-          />
+          >
+            {/* Section 1: Trade Data (بيانات الصفقة) */}
+            <TradeDataSection
+              entryPrice={activeCurrency.entryPrice}
+              onChangeEntryPrice={(val) => updateActiveCurrency({ entryPrice: val })}
+              tradeAmount={activeCurrency.tradeAmount}
+              onChangeTradeAmount={(val) => updateActiveCurrency({ tradeAmount: val })}
+              entryFeePercent={activeCurrency.entryFeePercent}
+              onChangeEntryFeePercent={(val) => updateActiveCurrency({ entryFeePercent: val })}
+              exitFeePercent={activeCurrency.exitFeePercent}
+              onChangeExitFeePercent={(val) => updateActiveCurrency({ exitFeePercent: val })}
+              entryFeeFixed={activeCurrency.entryFeeFixed}
+              onChangeEntryFeeFixed={(val) => updateActiveCurrency({ entryFeeFixed: val })}
+              exitFeeFixed={activeCurrency.exitFeeFixed}
+              onChangeExitFeeFixed={(val) => updateActiveCurrency({ exitFeeFixed: val })}
+              errorMessage={
+                !calculationResult.hasValidBaseInputs && (activeCurrency.entryPrice || activeCurrency.tradeAmount)
+                  ? calculationResult.baseErrorMessage
+                  : undefined
+              }
+            />
 
-          {/* Section 3: Test Prices & Linked Results (أسعار الاختبار ونتائجها) */}
-          <TestPricesSection
-            testPrices={testPrices}
-            onChangeTestPrice={handleChangeTestPrice}
-            onAddTestPrice={handleAddTestPrice}
-            onRemoveTestPrice={handleRemoveTestPrice}
-            percentTrack={calculationResult.percentTrack}
-            fixedTrack={calculationResult.fixedTrack}
-          />
-        </FloatingContainer>
+            {/* Section 2: Break-Even Price (سعر التعادل) */}
+            <BreakEvenSection
+              hasValidBase={calculationResult.hasValidBaseInputs}
+              percentTrack={calculationResult.percentTrack}
+              fixedTrack={calculationResult.fixedTrack}
+            />
+
+            {/* Section 3: Test Prices & Linked Results (أسعار الاختبار ونتائجها) */}
+            <TestPricesSection
+              testPrices={activeCurrency.testPrices}
+              onChangeTestPrice={handleChangeTestPrice}
+              onAddTestPrice={handleAddTestPrice}
+              onRemoveTestPrice={handleRemoveTestPrice}
+              percentTrack={calculationResult.percentTrack}
+              fixedTrack={calculationResult.fixedTrack}
+            />
+          </FloatingContainer>
+        )}
       </div>
 
       {/* Settings Modal for default fees */}

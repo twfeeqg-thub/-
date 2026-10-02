@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { ServiceWorkerRegister } from '@/components/ServiceWorkerRegister';
+import { ThemeProvider } from '@/context/ThemeContext';
 
 export const viewport: Viewport = {
   themeColor: '#0f172a',
@@ -40,13 +41,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ar" dir="rtl">
-      <body className="bg-slate-950 text-slate-100 antialiased min-h-screen selection:bg-amber-500/30 selection:text-amber-200">
-        <ServiceWorkerRegister />
-        {children}
+    <html lang="ar" dir="rtl" className="dark" suppressHydrationWarning>
+      <body className="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased min-h-screen selection:bg-amber-500/30 selection:text-amber-600 dark:selection:text-amber-200 transition-colors duration-150">
+        <ThemeProvider>
+          <ServiceWorkerRegister />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
 }
+
+
 
 

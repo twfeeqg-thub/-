@@ -9,9 +9,12 @@ import {
   X, 
   RotateCcw,
   SlidersHorizontal,
-  BookmarkCheck
+  BookmarkCheck,
+  ArrowRight,
+  Coins
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
+import { ThemeToggle } from './ThemeToggle';
 
 export type WindowMode = 'normal' | 'maximized' | 'minimized' | 'floating' | 'closed';
 
@@ -21,6 +24,8 @@ interface WindowHeaderProps {
   onReset: () => void;
   onToggleSettings?: () => void;
   hasDefaultsSaved?: boolean;
+  currencyName?: string;
+  onBackToDashboard?: () => void;
 }
 
 export const WindowHeader: React.FC<WindowHeaderProps> = ({
@@ -29,20 +34,44 @@ export const WindowHeader: React.FC<WindowHeaderProps> = ({
   onReset,
   onToggleSettings,
   hasDefaultsSaved = false,
+  currencyName,
+  onBackToDashboard,
 }) => {
   return (
-    <header className="flex items-center justify-between px-3.5 py-2.5 bg-slate-900/90 border-b border-slate-800/80 backdrop-blur-md select-none rounded-t-2xl">
-      {/* Brand title and V0 tag */}
+    <header className="flex items-center justify-between px-3.5 py-2.5 bg-white/95 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-800/80 backdrop-blur-md select-none rounded-t-2xl">
+      {/* Brand title / Back Button / Currency Badge */}
       <div className="flex items-center gap-2">
-        <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400 font-bold text-xs">
-          V0
-        </div>
+        {onBackToDashboard && (
+          <button
+            onClick={onBackToDashboard}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-amber-500/20 text-slate-700 dark:text-slate-200 hover:text-amber-600 dark:hover:text-amber-400 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all cursor-pointer active:scale-95"
+            title="الرجوع إلى لوحة العملات"
+          >
+            <ArrowRight className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">لوحة العملات</span>
+            <span className="sm:hidden">رجوع</span>
+          </button>
+        )}
+
+        {currencyName ? (
+          <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-xl">
+            <Coins className="w-3.5 h-3.5 text-amber-500" />
+            <span className="text-xs font-mono font-black text-amber-600 dark:text-amber-400">
+              {currencyName}
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-500 font-bold text-xs">
+            V0
+          </div>
+        )}
+
         <div>
-          <h1 className="text-sm font-bold text-slate-100 tracking-tight leading-tight">
+          <h1 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 tracking-tight leading-tight">
             حاسبة الفروقات السعرية
           </h1>
-          <p className="text-[10px] text-slate-400 hidden sm:block">
-            حساب التعادل والربح/الخسارة اليدوي
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 hidden sm:block">
+            {currencyName ? `حسابات عملة ${currencyName} المستقلة` : 'حساب التعادل والربح/الخسارة'}
           </p>
         </div>
       </div>
@@ -51,14 +80,17 @@ export const WindowHeader: React.FC<WindowHeaderProps> = ({
       <div className="flex items-center gap-1 sm:gap-1.5">
         <PWAInstallButton />
 
+        {/* Theme Toggle (Light / Dark) */}
+        <ThemeToggle />
+
         {/* Quick Settings for default fees */}
         {onToggleSettings && (
           <button
             onClick={onToggleSettings}
             className={`p-1.5 rounded-lg border transition cursor-pointer ${
               hasDefaultsSaved
-                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
-                : 'bg-slate-800/70 text-slate-400 border-slate-700/60 hover:text-slate-200 hover:bg-slate-800'
+                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                : 'bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700/60 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800'
             }`}
             title="الإعدادات الافتراضية للتكاليف"
           >
@@ -73,8 +105,8 @@ export const WindowHeader: React.FC<WindowHeaderProps> = ({
         {/* Reset inputs button */}
         <button
           onClick={onReset}
-          className="p-1.5 rounded-lg bg-slate-800/70 text-slate-400 border border-slate-700/60 hover:text-rose-300 hover:bg-rose-950/40 hover:border-rose-900/40 transition cursor-pointer"
-          title="تفريغ الخانات"
+          className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-rose-500 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+          title="تفريغ خانات هذه العملة"
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
@@ -85,8 +117,8 @@ export const WindowHeader: React.FC<WindowHeaderProps> = ({
           onClick={() => onSetMode(mode === 'minimized' ? 'normal' : 'minimized')}
           className={`p-1.5 rounded-lg border transition cursor-pointer ${
             mode === 'minimized'
-              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-              : 'bg-slate-800/70 text-slate-400 border-slate-700/60 hover:text-slate-200 hover:bg-slate-800'
+              ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border-amber-500/40'
+              : 'bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700/60 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800'
           }`}
           title="تصغير"
         >
@@ -98,8 +130,8 @@ export const WindowHeader: React.FC<WindowHeaderProps> = ({
           onClick={() => onSetMode(mode === 'floating' ? 'normal' : 'floating')}
           className={`p-1.5 rounded-lg border transition cursor-pointer ${
             mode === 'floating'
-              ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
-              : 'bg-slate-800/70 text-slate-400 border-slate-700/60 hover:text-slate-200 hover:bg-slate-800'
+              ? 'bg-sky-500/20 text-sky-600 dark:text-sky-300 border-sky-500/40'
+              : 'bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700/60 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800'
           }`}
           title={mode === 'floating' ? 'إلغاء الوضع العائم' : 'عائم'}
         >
@@ -111,8 +143,8 @@ export const WindowHeader: React.FC<WindowHeaderProps> = ({
           onClick={() => onSetMode(mode === 'maximized' ? 'normal' : 'maximized')}
           className={`p-1.5 rounded-lg border transition cursor-pointer ${
             mode === 'maximized'
-              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-              : 'bg-slate-800/70 text-slate-400 border-slate-700/60 hover:text-slate-200 hover:bg-slate-800'
+              ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border-amber-500/40'
+              : 'bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700/60 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800'
           }`}
           title={mode === 'maximized' ? 'استعادة الحجم العادي' : 'تكبير'}
         >
@@ -123,11 +155,11 @@ export const WindowHeader: React.FC<WindowHeaderProps> = ({
           )}
         </button>
 
-        {/* Close (إغلاق) */}
+        {/* Close (إغلاق / رجوع للوحة) */}
         <button
-          onClick={() => onSetMode('closed')}
-          className="p-1.5 rounded-lg bg-slate-800/70 text-slate-400 border border-slate-700/60 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
-          title="إغلاق الواجهة"
+          onClick={onBackToDashboard ? onBackToDashboard : () => onSetMode('closed')}
+          className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+          title={onBackToDashboard ? 'الرجوع للوحة العملات' : 'إغلاق الواجهة'}
         >
           <X className="w-3.5 h-3.5" />
         </button>

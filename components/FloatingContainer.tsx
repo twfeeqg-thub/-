@@ -12,6 +12,8 @@ interface FloatingContainerProps {
   onReset: () => void;
   onToggleSettings?: () => void;
   hasDefaultsSaved?: boolean;
+  currencyName?: string;
+  onBackToDashboard?: () => void;
   percentTrack: CalculationTrackResult;
   fixedTrack: CalculationTrackResult;
 }
@@ -23,13 +25,14 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
   onReset,
   onToggleSettings,
   hasDefaultsSaved,
+  currencyName,
+  onBackToDashboard,
   percentTrack,
   fixedTrack,
 }) => {
   // Floating Window Coordinates & Dimensions (static initial values for SSR consistency)
   const [position, setPosition] = useState({ x: 20, y: 30 });
   const [size, setSize] = useState({ width: 380, height: 620 });
-
 
   // Refs for dragging and resizing
   const containerRef = useRef<HTMLDivElement>(null);
@@ -50,7 +53,6 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
     }
     onSetMode(newMode);
   }, [onSetMode]);
-
 
   // Dragging Handlers
   const handleDragStart = (clientX: number, clientY: number) => {
@@ -134,7 +136,7 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
     };
   }, [mode, size.width, position.x, position.y]);
 
-  // Touch Move / End for mobile browsers where pointer events might be captured
+  // Touch Move / End for mobile browsers
   const onHeaderTouchStart = (e: React.TouchEvent) => {
     if (mode !== 'floating' || e.touches.length !== 1) return;
     const touch = e.touches[0];
@@ -142,7 +144,6 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
   };
 
   const onHeaderMouseDown = (e: React.MouseEvent) => {
-    // Only drag on left mouse button and not on interactive buttons
     if (mode !== 'floating' || e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('input') || target.closest('a')) return;
@@ -158,7 +159,7 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
           className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-amber-500 text-slate-950 font-bold text-sm shadow-xl shadow-amber-500/20 hover:bg-amber-400 transition cursor-pointer active:scale-95"
         >
           <Calculator className="w-5 h-5" />
-          <span>فتح حاسبة الفروقات</span>
+          <span>فتح الحاسبة {currencyName ? `(${currencyName})` : ''}</span>
         </button>
       </div>
     );
@@ -171,17 +172,17 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
 
     return (
       <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4 animate-in fade-in slide-in-from-bottom-3">
-        <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-900/95 border border-slate-700/80 shadow-2xl backdrop-blur-md">
+        <div className="flex items-center justify-between p-3 rounded-2xl bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-700/80 shadow-2xl backdrop-blur-md">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-500">
               <Calculator className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-xs font-bold text-slate-100 block">
-                حاسبة الفروقات (مصغرة)
+              <span className="text-xs font-bold text-slate-900 dark:text-slate-100 block">
+                حاسبة {currencyName ? `[${currencyName}]` : 'الفروقات'} (مصغرة)
               </span>
               {hasBE && (
-                <span className="text-[10px] text-amber-400 font-mono" dir="ltr">
+                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono" dir="ltr">
                   التعادل: {formatCurrencyPrice(bePrice)}
                 </span>
               )}
@@ -215,7 +216,7 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
           height: `${size.height}px`,
           zIndex: 40,
         }}
-        className="flex flex-col bg-slate-950/95 border-2 border-slate-700/90 rounded-2xl shadow-2xl shadow-black/80 backdrop-blur-lg overflow-hidden transition-shadow select-text"
+        className="flex flex-col bg-white/98 dark:bg-slate-950/95 border-2 border-slate-300 dark:border-slate-700/90 rounded-2xl shadow-2xl shadow-black/30 dark:shadow-black/80 backdrop-blur-lg overflow-hidden transition-shadow select-text"
       >
         {/* Floating Header with Drag Grip */}
         <div
@@ -223,8 +224,8 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
           onTouchStart={onHeaderTouchStart}
           className="cursor-move select-none"
         >
-          <div className="w-full flex justify-center py-1 bg-slate-900 border-b border-slate-800/60">
-            <GripHorizontal className="w-8 h-3 text-slate-500 hover:text-slate-300" />
+          <div className="w-full flex justify-center py-1 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800/60">
+            <GripHorizontal className="w-8 h-3 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300" />
           </div>
           <WindowHeader
             mode={mode}
@@ -232,6 +233,8 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
             onReset={onReset}
             onToggleSettings={onToggleSettings}
             hasDefaultsSaved={hasDefaultsSaved}
+            currencyName={currencyName}
+            onBackToDashboard={onBackToDashboard}
           />
         </div>
 
@@ -241,10 +244,9 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
         </div>
 
         {/* Resize Handles */}
-        {/* Bottom-Right Resize Handle */}
         <div
           onPointerDown={(e) => handleResizeStart(e, 'se')}
-          className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize flex items-end justify-end p-0.5 text-slate-500 hover:text-amber-400 transition"
+          className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize flex items-end justify-end p-0.5 text-slate-400 dark:text-slate-500 hover:text-amber-500 transition"
           title="سحب لتغيير الحجم"
         >
           <svg className="w-3 h-3" viewBox="0 0 6 6" fill="currentColor">
@@ -254,10 +256,9 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
           </svg>
         </div>
 
-        {/* Bottom-Left Resize Handle (for convenient RTL / left-side resizing) */}
         <div
           onPointerDown={(e) => handleResizeStart(e, 'sw')}
-          className="absolute bottom-0 left-0 w-4 h-4 cursor-sw-resize flex items-end justify-start p-0.5 text-slate-500 hover:text-amber-400 transition"
+          className="absolute bottom-0 left-0 w-4 h-4 cursor-sw-resize flex items-end justify-start p-0.5 text-slate-400 dark:text-slate-500 hover:text-amber-500 transition"
           title="سحب لتغيير الحجم"
         >
           <svg className="w-3 h-3" viewBox="0 0 6 6" fill="currentColor">
@@ -273,14 +274,16 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
   // If MAXIMIZED: full screen container
   if (mode === 'maximized') {
     return (
-      <div className="fixed inset-0 z-30 flex flex-col bg-slate-950 p-2 sm:p-4 overflow-hidden">
-        <div className="flex-1 flex flex-col max-w-4xl w-full mx-auto bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="fixed inset-0 z-30 flex flex-col bg-slate-50 dark:bg-slate-950 p-2 sm:p-4 overflow-hidden">
+        <div className="flex-1 flex flex-col max-w-4xl w-full mx-auto bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
           <WindowHeader
             mode={mode}
             onSetMode={handleModeChange}
             onReset={onReset}
             onToggleSettings={onToggleSettings}
             hasDefaultsSaved={hasDefaultsSaved}
+            currencyName={currencyName}
+            onBackToDashboard={onBackToDashboard}
           />
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 text-right">
             {children}
@@ -292,13 +295,15 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
 
   // Default NORMAL Mode: Mobile-first centered card
   return (
-    <div className="w-full max-w-lg mx-auto bg-slate-950/90 border border-slate-800/90 rounded-2xl shadow-2xl overflow-hidden">
+    <div className="w-full max-w-lg mx-auto bg-white dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800/90 rounded-2xl shadow-xl dark:shadow-2xl overflow-hidden">
       <WindowHeader
         mode={mode}
         onSetMode={handleModeChange}
         onReset={onReset}
         onToggleSettings={onToggleSettings}
         hasDefaultsSaved={hasDefaultsSaved}
+        currencyName={currencyName}
+        onBackToDashboard={onBackToDashboard}
       />
       <div className="p-3.5 sm:p-5 space-y-4 text-right">
         {children}
