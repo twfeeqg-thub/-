@@ -17,6 +17,7 @@ import { FloatingContainer } from '@/components/FloatingContainer';
 import { TradeDataSection } from '@/components/TradeDataSection';
 import { BreakEvenSection } from '@/components/BreakEvenSection';
 import { TestPricesSection } from '@/components/TestPricesSection';
+import { ProfitLossChart } from '@/components/ProfitLossChart';
 import { SettingsModal, DefaultFeeSettings } from '@/components/SettingsModal';
 import { WorkspaceBackground } from '@/components/WorkspaceBackground';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
@@ -297,7 +298,17 @@ export default function CalculatorPage() {
               percentTrack={calculationResult.percentTrack}
               fixedTrack={calculationResult.fixedTrack}
             />
+
+            {/* Section 4: Interactive Profit/Loss Chart (الرسم البياني التفاعلي للأرباح والخسائر) */}
+            <ProfitLossChart
+              entryPrice={activeCurrency.entryPrice}
+              hasValidBase={calculationResult.hasValidBaseInputs}
+              percentTrack={calculationResult.percentTrack}
+              fixedTrack={calculationResult.fixedTrack}
+              currencyName={activeCurrency.name}
+            />
           </FloatingContainer>
+
         )}
       </div>
 
