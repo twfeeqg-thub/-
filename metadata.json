@@ -1,0 +1,6 @@
+{
+  "name": "حاسبة الفروقات السعرية",
+  "description": "حاسبة يدوية دقيقة لحساب أسعار التعادل وصافي الربح والخسارة لفروقات أسعار العملات مع دعم الوضع العائم والـ PWA",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
