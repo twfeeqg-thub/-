@@ -28,6 +28,17 @@ export function ServiceWorkerRegister() {
           .register('/sw.js', { scope: '/' })
           .then((registration) => {
             registration.update();
+            registration.addEventListener('updatefound', () => {
+              const newWorker = registration.installing;
+              if (newWorker) {
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // Automatically reload to apply fresh updates
+                    window.location.reload();
+                  }
+                });
+              }
+            });
           })
           .catch((error) => {
             console.warn('[PWA] Service Worker registration failed:', error);

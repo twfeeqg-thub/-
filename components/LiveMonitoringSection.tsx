@@ -80,6 +80,7 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isEditingSymbol, setIsEditingSymbol] = useState(false);
   const [customInputSymbol, setCustomInputSymbol] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [browserNotificationEnabled, setBrowserNotificationEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -146,44 +147,59 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
     }
   }, [targetPrice, targetDirection, soundEnabled, formattedSymbol]);
 
-  // Fetch price from REST API
+  // Fetch price from REST API with strict timeout
   const fetchPriceRest = useCallback(async (symbol: string) => {
+    setIsRefreshing(true);
     try {
-      // Direct call first
-      let res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`).catch(() => null);
-      
-      // If direct call fails (e.g. mobile CORS), use internal API proxy
-      if (!res || !res.ok) {
-        res = await fetch(`/api/binance/price?symbol=${symbol}`).catch(() => null);
-      }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+      const res = await fetch(`/api/binance/price?symbol=${symbol}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      }).catch(() => null);
+      clearTimeout(timeoutId);
 
       if (res && res.ok) {
         const data = await res.json();
         if (data.price) {
           const p = parseFloat(data.price);
           if (!isNaN(p)) {
+            setPrevPrice((old) => (old !== null ? old : p));
             setCurrentPrice(p);
             setConnectionStatus('connected');
             setErrorMessage(null);
+            if (data.priceChangePercent) {
+              const cp = parseFloat(data.priceChangePercent);
+              if (!isNaN(cp)) setPriceChange24h(cp);
+            }
             checkTargetReached(p);
+            setIsRefreshing(false);
             return true;
           }
         }
       } else if (res) {
         const errData = await res.json().catch(() => null);
-        if (errData && (errData.code === -1121 || errData.code === -1100)) {
-          setErrorMessage(`الرمز "${symbol}" غير موجود في بينانس. يرجى تعديل الرمز.`);
-          setConnectionStatus('error');
-          return false;
-        }
+        setConnectionStatus('error');
+        setErrorMessage(errData?.error || `تعذر جلب السعر لـ ${symbol}`);
+        setIsRefreshing(false);
+        return false;
+      } else {
+        // Request failed or timed out
+        setConnectionStatus('error');
+        setErrorMessage('تعذر الاتصال ببيانات الأسعار، يرجى التأكد من تشغيل الإنترنت.');
+        setIsRefreshing(false);
+        return false;
       }
-    } catch {
-      // Ignore
+    } catch (e: unknown) {
+      setConnectionStatus('error');
+      setErrorMessage(e instanceof Error ? e.message : 'خطأ في الاتصال');
     }
+    setIsRefreshing(false);
     return false;
   }, [checkTargetReached]);
 
-  // Connect to Binance Public Stream & Setup Polling
+  // Connect & Setup Polling
   useEffect(() => {
     if (!isActive) {
       if (wsRef.current) {
@@ -204,16 +220,11 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
       fetchPriceRest(formattedSymbol);
     }, 0);
 
-    // Establish WebSocket using standard port 443 (supported by all mobile carriers)
+    // Optional background WebSocket stream for live second-by-second updates
     let ws: WebSocket | null = null;
     try {
-      ws = new WebSocket(`wss://stream.binance.com:443/ws/${pairLower}@ticker`);
+      ws = new WebSocket(`wss://stream.binance.com:9443/ws/${pairLower}@ticker`);
       wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnectionStatus('connected');
-        setErrorMessage(null);
-      };
 
       ws.onmessage = (event) => {
         try {
@@ -236,18 +247,8 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
           // Ignore parse errors
         }
       };
-
-      ws.onerror = () => {
-        // If WebSocket has an error on mobile, REST polling seamlessly handles it
-        fetchPriceRest(formattedSymbol);
-      };
-
-      ws.onclose = () => {
-        // Fallback to REST
-        fetchPriceRest(formattedSymbol);
-      };
     } catch {
-      setTimeout(() => fetchPriceRest(formattedSymbol), 0);
+      // WebSocket failed, polling will seamlessly handle everything
     }
 
     // Reliable background interval every 3 seconds
@@ -446,18 +447,19 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
             )}
           </div>
 
-          {/* Error Message if Symbol is invalid */}
+          {/* Error Message if Symbol is invalid or connection failed */}
           {errorMessage && (
-            <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
-              <div className="flex-1 text-[11px] leading-tight">{errorMessage}</div>
+            <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                <div className="text-[11px] leading-tight">{errorMessage}</div>
+              </div>
               <button
                 type="button"
                 onClick={() => fetchPriceRest(formattedSymbol)}
-                className="p-1 rounded hover:bg-rose-500/20 text-rose-600 cursor-pointer"
-                title="إعادة المحاولة"
+                className="px-2 py-1 rounded bg-rose-500/20 text-rose-600 hover:bg-rose-500/30 text-[10px] font-bold cursor-pointer shrink-0"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                إعادة المحاولة 🔄
               </button>
             </div>
           )}
@@ -469,18 +471,32 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
                 <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300">
                   {formattedSymbol}
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                
+                {/* Connection Status Badge */}
+                <button
+                  type="button"
+                  onClick={() => fetchPriceRest(formattedSymbol)}
+                  className="text-[10px] px-1.5 py-0.5 rounded-md font-mono bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center gap-1 cursor-pointer hover:opacity-80 transition"
+                  title="اضغط للتحديث الفوري"
+                >
                   {displayStatus === 'connected' ? (
-                    <><span>🟢 متصل ببينانس</span></>
+                    <>
+                      <span>🟢 متصل ببينانس</span>
+                      {isRefreshing && <RefreshCw className="w-2.5 h-2.5 animate-spin text-amber-500" />}
+                    </>
                   ) : displayStatus === 'connecting' ? (
                     <>
                       <RefreshCw className="w-2.5 h-2.5 animate-spin text-amber-500" />
                       <span>جاري الاتصال...</span>
                     </>
                   ) : (
-                    <><span>🔴 خطأ بالاتصال</span></>
+                    <>
+                      <span>🔴 خطأ بالاتصال</span>
+                      <RefreshCw className="w-2.5 h-2.5 text-rose-500" />
+                    </>
                   )}
-                </span>
+                </button>
+
                 {priceChange24h !== null && (
                   <span
                     className={`text-[10px] font-mono font-bold flex items-center gap-0.5 ${
@@ -505,7 +521,7 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
             </div>
 
             {/* Quick Actions with live price */}
-            {currentPrice !== null && (
+            {currentPrice !== null ? (
               <div className="flex items-center gap-1.5 self-end">
                 <button
                   type="button"
@@ -526,6 +542,15 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
                   <span>كسعر اختبار</span>
                 </button>
               </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fetchPriceRest(formattedSymbol)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-bold text-xs shadow-sm hover:bg-amber-400 transition cursor-pointer active:scale-95 self-end"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>تحديث السعر الآن</span>
+              </button>
             )}
           </div>
 
