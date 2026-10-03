@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { CurrencyItem, MAX_CURRENCIES } from '@/types/currency';
-import { calculateAll, formatCurrencyPrice, formatPercent, formatUSDT } from '@/lib/calculator';
+import { calculateAll, formatCurrencyPrice, formatCompactPrice, formatPercent, formatUSDT } from '@/lib/calculator';
 import { 
   Plus, 
   Trash2, 
@@ -11,6 +11,7 @@ import {
   ArrowLeft, 
   Coins, 
   Target, 
+  Bell,
   AlertCircle,
   SlidersHorizontal,
   X,
@@ -149,7 +150,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
         <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs">
           <AlertCircle className="w-4 h-4 shrink-0 text-amber-500" />
           <span>
-            لقد وصلت للحد الأقصى المسموح به وهو <strong>10 عملات</strong>. لحساب عملة جديدة، يمكنك حذف إحدى العملات الحالية.
+            لقد وصلت للحد الأقصى المسموح به وهو <strong>{MAX_CURRENCIES} عملة</strong>. لحساب عملة جديدة، يمكنك حذف إحدى العملات الحالية.
           </span>
         </div>
       )}
@@ -209,93 +210,106 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
               <div
                 key={currency.id}
                 onClick={() => onSelectCurrency(currency.id)}
-                className="group relative flex flex-col justify-between p-4 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 hover:border-amber-500/60 dark:hover:border-amber-500/60 shadow-xs hover:shadow-lg transition-all cursor-pointer text-right"
+                className="group relative flex flex-col justify-between p-3.5 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 hover:border-amber-500/60 dark:hover:border-amber-500/60 shadow-xs hover:shadow-md transition-all cursor-pointer text-right gap-2.5"
               >
-                {/* Card Top: Coin Name & Delete Action */}
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-2.5 mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono font-black text-xs flex items-center justify-center border border-amber-500/30">
+                {/* السطر الأول: رأس البطاقة (الاسم، المبلغ، رابط الفتح، زر الحذف) */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono font-black text-[11px] flex items-center justify-center border border-amber-500/30 shrink-0">
                       {currency.name.slice(0, 3)}
                     </span>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 group-hover:text-amber-500 transition-colors">
+                    <div className="flex items-baseline gap-2 truncate">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 group-hover:text-amber-500 transition-colors truncate">
                         {currency.name}
                       </h3>
-                      <span className="text-[10px] text-slate-400 block font-mono">
-                        {currency.tradeAmount ? `${currency.tradeAmount} USDT` : 'المبلغ غير محدد'}
+                      <span className="text-[11px] text-slate-400 font-mono shrink-0" dir="ltr">
+                        {currency.tradeAmount ? `${currency.tradeAmount} USDT` : ''}
                       </span>
                     </div>
                   </div>
 
-                  {/* Delete button with confirmation trigger */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCurrencyToDelete(currency);
-                    }}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                    title={`حذف عملة ${currency.name}`}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* قيمة التنبيه (تظهر دائماً حتى لو كانت المراقبة في وضع الإغلاق) */}
+                    {currency.targetPrice ? (
+                      <span
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-mono text-[10px] font-bold border transition-colors ${
+                          currency.isMonitoringActive
+                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                            : 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                        }`}
+                        title={`سعر التنبيه: ${currency.targetPrice} USDT (${currency.targetDirection === 'below' ? 'هبوط ≤' : 'صعود ≥'}) - المراقبة: ${currency.isMonitoringActive ? 'نَشِطة 🟢' : 'مُغلقة ⚪'}`}
+                      >
+                        <Bell className={`w-2.5 h-2.5 ${currency.isMonitoringActive ? 'text-emerald-500 animate-pulse' : 'text-amber-500'}`} />
+                        <span>تنبيه: {formatCompactPrice(currency.targetPrice)}</span>
+                        <span className="text-[9px] opacity-75">{currency.targetDirection === 'below' ? '≤' : '≥'}</span>
+                      </span>
+                    ) : null}
 
-                {/* Summary Metrics */}
-                <div className="space-y-2 text-xs">
-                  {/* Entry Price */}
-                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
-                    <span className="text-[11px]">سعر الدخول:</span>
-                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200" dir="ltr">
-                      {currency.entryPrice ? formatCurrencyPrice(currency.entryPrice) : '—'}
+                    <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold flex items-center gap-0.5 group-hover:translate-x-[-2px] transition-transform">
+                      <span>فتح</span>
+                      <ArrowLeft className="w-3.5 h-3.5" />
                     </span>
-                  </div>
-
-                  {/* Break-even Price */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1">
-                      <Target className="w-3 h-3" />
-                      سعر التعادل:
-                    </span>
-                    <span className="font-mono font-extrabold text-amber-600 dark:text-amber-400" dir="ltr">
-                      {hasBreakEven ? formatCurrencyPrice(breakEvenVal) : 'بانتظار البيانات'}
-                    </span>
-                  </div>
-
-                  {/* Key Test Result */}
-                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-500 dark:text-slate-400">أحدث اختبار:</span>
-                      {primaryTest ? (
-                        <div className="flex items-center gap-1.5" dir="ltr">
-                          <span className="font-mono text-slate-700 dark:text-slate-300">
-                            {formatCurrencyPrice(primaryTest.price)}:
-                          </span>
-                          <span
-                            className={`font-mono font-bold px-1.5 py-0.2 rounded text-[10px] ${
-                              primaryTest.status === 'profit'
-                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                                : primaryTest.status === 'loss'
-                                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
-                                : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                            }`}
-                          >
-                            {primaryTest.netPnL > 0 ? '+' : ''}{formatPercent(primaryTest.pnlPercent)}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-slate-400 text-[10px]">لا يوجد اختبار</span>
-                      )}
-                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCurrencyToDelete(currency);
+                      }}
+                      className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                      title={`حذف عملة ${currency.name}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
 
-                {/* Card Action Link */}
-                <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between text-[11px] text-amber-600 dark:text-amber-400 font-semibold group-hover:translate-x-[-2px] transition-transform">
-                  <span>فتح الحاسبة الكاملة</span>
-                  <ArrowLeft className="w-3.5 h-3.5" />
+                {/* السطر الثاني: البيانات الثلاثة أفقياً وبمنازل عشرية مناسبة للعرض */}
+                <div className="grid grid-cols-3 items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/80 text-xs">
+                  {/* سعر الدخول */}
+                  <div className="flex items-baseline gap-1 truncate text-slate-600 dark:text-slate-400">
+                    <span className="text-[10px] text-slate-400 shrink-0">دخول:</span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200 truncate" dir="ltr">
+                      {formatCompactPrice(currency.entryPrice)}
+                    </span>
+                  </div>
+
+                  {/* سعر التعادل */}
+                  <div className="flex items-baseline gap-1 truncate justify-center">
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 shrink-0 flex items-center gap-0.5 font-medium">
+                      <Target className="w-3 h-3 text-amber-500" />
+                      تعادل:
+                    </span>
+                    <span className="font-mono font-bold text-amber-600 dark:text-amber-400 truncate" dir="ltr">
+                      {hasBreakEven ? formatCompactPrice(breakEvenVal) : '—'}
+                    </span>
+                  </div>
+
+                  {/* أحدث اختبار مع النسبة */}
+                  <div className="flex items-baseline gap-1 truncate justify-end text-left" dir="ltr">
+                    {primaryTest ? (
+                      <div className="flex items-center gap-1 truncate">
+                        <span className="font-mono text-slate-700 dark:text-slate-300 truncate text-[11px]">
+                          {formatCompactPrice(primaryTest.price)}
+                        </span>
+                        <span
+                          className={`font-mono font-bold px-1.5 py-0.2 rounded text-[10px] shrink-0 ${
+                            primaryTest.status === 'profit'
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                              : primaryTest.status === 'loss'
+                              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          }`}
+                        >
+                          {primaryTest.netPnL > 0 ? '+' : ''}{formatPercent(primaryTest.pnlPercent)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-slate-400 text-[10px]" dir="rtl">لا اختبار</span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
+
           })}
         </div>
       )}
@@ -338,7 +352,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
                   maxLength={12}
                 />
                 <span className="text-[10px] text-slate-400 block mt-1">
-                  يمكنك إدخال أي اسم عملة تريده (حتى 10 عملات كحد أقصى)
+                  يمكنك إدخال أي اسم عملة تريده (حتى {MAX_CURRENCIES} عملة كحد أقصى)
                 </span>
               </div>
 

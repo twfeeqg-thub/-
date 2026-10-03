@@ -116,6 +116,27 @@ export function formatCurrencyPrice(val: number | string): string {
 }
 
 /**
+ * تنسيق سعر العملة المختصر لبطاقات العرض لتناسب العرض الأفقي بسطرين
+ */
+export function formatCompactPrice(val: number | string | undefined | null): string {
+  if (val === undefined || val === null || val === '') return '—';
+  const num = typeof val === 'number' ? val : parseFloat(val);
+  if (isNaN(num)) return String(val);
+  if (Math.abs(num) < 1e-12) return '0';
+
+  if (Math.abs(num) >= 100) {
+    return num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+  if (Math.abs(num) >= 1) {
+    return num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+  }
+  if (Math.abs(num) >= 0.001) {
+    return num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+  }
+  return toExactDecimalString(num, 6);
+}
+
+/**
  * تنسيق مبالغ USDT
  */
 export function formatUSDT(val: number): string {
