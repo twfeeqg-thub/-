@@ -9,9 +9,15 @@ export interface CurrencyItem {
   entryFeeFixed: string;
   exitFeeFixed: string;
   testPrices: string[];
+  // Live monitoring optional fields
+  isMonitoringActive?: boolean;
+  targetPrice?: string;
+  targetDirection?: 'above' | 'below';
 }
 
 export const STORAGE_KEY_CURRENCIES = 'price_calc_v0_currencies';
 export const STORAGE_KEY_THEME = 'price_calc_v0_theme';
 export const STORAGE_KEY_DEFAULTS = 'price_calc_v0_defaults';
-export const MAX_CURRENCIES = 10;
+export const MAX_CURRENCIES = 25;
+export const MAX_TEST_PRICES = 10;
+

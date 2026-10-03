@@ -9,6 +9,7 @@ import {
 import { 
   CurrencyItem, 
   MAX_CURRENCIES, 
+  MAX_TEST_PRICES,
   STORAGE_KEY_CURRENCIES, 
   STORAGE_KEY_DEFAULTS 
 } from '@/types/currency';
@@ -18,6 +19,7 @@ import { TradeDataSection } from '@/components/TradeDataSection';
 import { BreakEvenSection } from '@/components/BreakEvenSection';
 import { TestPricesSection } from '@/components/TestPricesSection';
 import { ProfitLossChart } from '@/components/ProfitLossChart';
+import { LiveMonitoringSection } from '@/components/LiveMonitoringSection';
 import { SettingsModal, DefaultFeeSettings } from '@/components/SettingsModal';
 import { WorkspaceBackground } from '@/components/WorkspaceBackground';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
@@ -146,10 +148,10 @@ export default function CalculatorPage() {
     });
   };
 
-  // Test prices handlers for active currency (max 5)
+  // Test prices handlers for active currency (max 10)
   const handleAddTestPrice = () => {
     if (!activeCurrency) return;
-    if (activeCurrency.testPrices.length < 5) {
+    if (activeCurrency.testPrices.length < MAX_TEST_PRICES) {
       updateActiveCurrency({
         testPrices: [...activeCurrency.testPrices, ''],
       });
@@ -171,6 +173,22 @@ export default function CalculatorPage() {
     const updated = [...activeCurrency.testPrices];
     updated[index] = val;
     updateActiveCurrency({ testPrices: updated });
+  };
+
+  const handleApplyLivePriceAsEntry = (priceStr: string) => {
+    updateActiveCurrency({ entryPrice: priceStr });
+  };
+
+  const handleAddLivePriceAsTest = (priceStr: string) => {
+    if (!activeCurrency) return;
+    const currentList = [...activeCurrency.testPrices];
+    const emptyIndex = currentList.findIndex((p) => !p.trim());
+    if (emptyIndex !== -1) {
+      currentList[emptyIndex] = priceStr;
+      updateActiveCurrency({ testPrices: currentList });
+    } else if (currentList.length < MAX_TEST_PRICES) {
+      updateActiveCurrency({ testPrices: [...currentList, priceStr] });
+    }
   };
 
   // Calculation results for active currency
@@ -261,8 +279,29 @@ export default function CalculatorPage() {
             percentTrack={calculationResult.percentTrack}
             fixedTrack={calculationResult.fixedTrack}
           >
+            {/* Section 0: Live Monitoring & Alerts from Binance (وضع المراقبة اللحظية والتنبيهات) */}
+            <LiveMonitoringSection
+              currencyName={activeCurrency.name}
+              isActive={Boolean(activeCurrency.isMonitoringActive)}
+              onToggleActive={(active) => updateActiveCurrency({ isMonitoringActive: active })}
+              targetPrice={activeCurrency.targetPrice || ''}
+              onChangeTargetPrice={(price) => updateActiveCurrency({ targetPrice: price })}
+              targetDirection={activeCurrency.targetDirection || 'above'}
+              onChangeTargetDirection={(dir) => updateActiveCurrency({ targetDirection: dir })}
+              onApplyPriceAsEntry={handleApplyLivePriceAsEntry}
+              onAddPriceAsTest={handleAddLivePriceAsTest}
+              breakEvenPrice={
+                calculationResult.percentTrack.hasTrack && calculationResult.percentTrack.isValid
+                  ? calculationResult.percentTrack.breakEvenPrice
+                  : calculationResult.fixedTrack.hasTrack && calculationResult.fixedTrack.isValid
+                  ? calculationResult.fixedTrack.breakEvenPrice
+                  : undefined
+              }
+            />
+
             {/* Section 1: Trade Data (بيانات الصفقة) */}
             <TradeDataSection
+
               entryPrice={activeCurrency.entryPrice}
               onChangeEntryPrice={(val) => updateActiveCurrency({ entryPrice: val })}
               tradeAmount={activeCurrency.tradeAmount}

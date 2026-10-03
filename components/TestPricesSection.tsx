@@ -13,6 +13,7 @@ import {
   formatPercent, 
   formatUSDT 
 } from '@/lib/calculator';
+import { MAX_TEST_PRICES } from '@/types/currency';
 
 interface TestPricesSectionProps {
   testPrices: string[];
@@ -31,7 +32,7 @@ export const TestPricesSection: React.FC<TestPricesSectionProps> = ({
   percentTrack,
   fixedTrack,
 }) => {
-  const canAddMore = testPrices.length < 5;
+  const canAddMore = testPrices.length < MAX_TEST_PRICES;
   const showPercentResults = percentTrack.hasTrack && percentTrack.isValid;
   const showFixedResults = fixedTrack.hasTrack && fixedTrack.isValid;
 
@@ -82,7 +83,7 @@ export const TestPricesSection: React.FC<TestPricesSectionProps> = ({
             أسعار الاختبار (اختياري)
           </h2>
           <span className="text-[10px] text-slate-400 dark:text-slate-500">
-            ({testPrices.length}/5)
+            ({testPrices.length}/{MAX_TEST_PRICES})
           </span>
         </div>
 

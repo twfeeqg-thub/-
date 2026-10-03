@@ -88,7 +88,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              لوحة العملات المراقبة • إدارة حتى 10 عملات
+              لوحة العملات المراقبة • إدارة حتى {MAX_CURRENCIES} عملة
             </p>
           </div>
         </div>
@@ -137,7 +137,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
               ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-slate-300 dark:border-slate-700'
               : 'bg-amber-500 text-slate-950 hover:bg-amber-400 shadow-amber-500/20 active:scale-95'
           }`}
-          title={isMaxReached ? 'تم الوصول للحد الأقصى (10 عملات)' : 'إضافة عملة جديدة'}
+          title={isMaxReached ? `تم الوصول للحد الأقصى (${MAX_CURRENCIES} عملة)` : 'إضافة عملة جديدة'}
         >
           <Plus className="w-4 h-4 stroke-[2.5]" />
           <span>إضافة عملة</span>
