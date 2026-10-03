@@ -11,6 +11,7 @@ export interface CurrencyItem {
   testPrices: string[];
   // Live monitoring optional fields
   isMonitoringActive?: boolean;
+  binanceSymbol?: string;
   targetPrice?: string;
   targetDirection?: 'above' | 'below';
 }

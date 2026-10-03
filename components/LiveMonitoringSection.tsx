@@ -12,13 +12,18 @@ import {
   TrendingDown, 
   ArrowRightLeft, 
   Sparkles,
-  Zap
+  Zap,
+  Edit2,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { soundAlert } from '@/lib/soundAlert';
 import { formatCurrencyPrice } from '@/lib/calculator';
 
 interface LiveMonitoringSectionProps {
   currencyName: string;
+  binanceSymbol?: string;
+  onChangeBinanceSymbol?: (symbol: string) => void;
   isActive: boolean;
   onToggleActive: (active: boolean) => void;
   targetPrice: string;
@@ -30,8 +35,32 @@ interface LiveMonitoringSectionProps {
   breakEvenPrice?: number;
 }
 
+const POPULAR_SYMBOLS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'DOGE', 'PEPE'];
+
+/**
+ * دالة لتنظيف واستخراج رمز صالح لـ Binance
+ */
+function resolveBinanceSymbol(name: string, customSymbol?: string): string {
+  if (customSymbol && customSymbol.trim()) {
+    const cleanCustom = customSymbol.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    if (cleanCustom) {
+      return cleanCustom.endsWith('USDT') || cleanCustom.endsWith('USDC') ? cleanCustom : `${cleanCustom}USDT`;
+    }
+  }
+
+  const cleanName = name.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (cleanName && cleanName.length >= 2) {
+    return cleanName.endsWith('USDT') || cleanName.endsWith('USDC') ? cleanName : `${cleanName}USDT`;
+  }
+
+  // إذا كان اسم العملة بالعربية أو غير صالح، الافتراضي هو BTCUSDT
+  return 'BTCUSDT';
+}
+
 export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
   currencyName,
+  binanceSymbol,
+  onChangeBinanceSymbol,
   isActive,
   onToggleActive,
   targetPrice,
@@ -46,8 +75,12 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
   const [prevPrice, setPrevPrice] = useState<number | null>(null);
   const [priceChange24h, setPriceChange24h] = useState<number | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [targetReached, setTargetReached] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [isEditingSymbol, setIsEditingSymbol] = useState(false);
+  const [customInputSymbol, setCustomInputSymbol] = useState('');
+
   const [browserNotificationEnabled, setBrowserNotificationEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       return Notification.permission === 'granted';
@@ -59,9 +92,8 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastAlertTimeRef = useRef<number>(0);
 
-  // Derive Binance pair symbol (e.g. BTC -> BTCUSDT)
-  const resolvedSymbol = (currencyName.trim() || 'BTC').toUpperCase();
-  const formattedSymbol = resolvedSymbol.endsWith('USDT') ? resolvedSymbol : `${resolvedSymbol}USDT`;
+  // Symbol resolution
+  const formattedSymbol = resolveBinanceSymbol(currencyName, binanceSymbol);
 
   // Request browser notification permission
   const handleRequestNotification = async () => {
@@ -114,7 +146,44 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
     }
   }, [targetPrice, targetDirection, soundEnabled, formattedSymbol]);
 
-  // Connect to Binance Public Stream
+  // Fetch price from REST API
+  const fetchPriceRest = useCallback(async (symbol: string) => {
+    try {
+      // Direct call first
+      let res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`).catch(() => null);
+      
+      // If direct call fails (e.g. mobile CORS), use internal API proxy
+      if (!res || !res.ok) {
+        res = await fetch(`/api/binance/price?symbol=${symbol}`).catch(() => null);
+      }
+
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.price) {
+          const p = parseFloat(data.price);
+          if (!isNaN(p)) {
+            setCurrentPrice(p);
+            setConnectionStatus('connected');
+            setErrorMessage(null);
+            checkTargetReached(p);
+            return true;
+          }
+        }
+      } else if (res) {
+        const errData = await res.json().catch(() => null);
+        if (errData && (errData.code === -1121 || errData.code === -1100)) {
+          setErrorMessage(`الرمز "${symbol}" غير موجود في بينانس. يرجى تعديل الرمز.`);
+          setConnectionStatus('error');
+          return false;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return false;
+  }, [checkTargetReached]);
+
+  // Connect to Binance Public Stream & Setup Polling
   useEffect(() => {
     if (!isActive) {
       if (wsRef.current) {
@@ -130,35 +199,20 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
 
     const pairLower = formattedSymbol.toLowerCase();
 
-    // Initial fallback fetch via API proxy
-    const fetchInitial = async () => {
-      try {
-        const res = await fetch(`/api/binance/price?symbol=${formattedSymbol}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.price) {
-            const p = parseFloat(data.price);
-            if (!isNaN(p)) {
-              setCurrentPrice(p);
-              setConnectionStatus('connected');
-              checkTargetReached(p);
-            }
-          }
-        }
-      } catch {
-        // WebSocket will take over
-      }
-    };
-    fetchInitial();
+    // Initial immediate fetch
+    const initTimer = setTimeout(() => {
+      fetchPriceRest(formattedSymbol);
+    }, 0);
 
-    // Establish WebSocket connection directly with Binance
+    // Establish WebSocket using standard port 443 (supported by all mobile carriers)
     let ws: WebSocket | null = null;
     try {
-      ws = new WebSocket(`wss://stream.binance.com:9443/ws/${pairLower}@ticker`);
+      ws = new WebSocket(`wss://stream.binance.com:443/ws/${pairLower}@ticker`);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setConnectionStatus('connected');
+        setErrorMessage(null);
       };
 
       ws.onmessage = (event) => {
@@ -170,6 +224,8 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
             if (!isNaN(newPrice)) {
               setPrevPrice((old) => (old !== null ? old : newPrice));
               setCurrentPrice(newPrice);
+              setConnectionStatus('connected');
+              setErrorMessage(null);
               if (!isNaN(changeP)) {
                 setPriceChange24h(changeP);
               }
@@ -182,40 +238,25 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
       };
 
       ws.onerror = () => {
-        setConnectionStatus('error');
+        // If WebSocket has an error on mobile, REST polling seamlessly handles it
+        fetchPriceRest(formattedSymbol);
       };
 
       ws.onclose = () => {
-        if (isActive) {
-          setConnectionStatus('connecting');
-        }
+        // Fallback to REST
+        fetchPriceRest(formattedSymbol);
       };
     } catch {
-      setTimeout(() => setConnectionStatus('error'), 0);
+      setTimeout(() => fetchPriceRest(formattedSymbol), 0);
     }
 
-    // Polling fallback every 4 seconds in case WebSocket is blocked or offline
-    pollTimerRef.current = setInterval(async () => {
-      if (ws && ws.readyState === WebSocket.OPEN) return;
-      try {
-        const res = await fetch(`/api/binance/price?symbol=${formattedSymbol}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.price) {
-            const p = parseFloat(data.price);
-            if (!isNaN(p)) {
-              setCurrentPrice(p);
-              setConnectionStatus('connected');
-              checkTargetReached(p);
-            }
-          }
-        }
-      } catch {
-        // Ignore
-      }
-    }, 4000);
+    // Reliable background interval every 3 seconds
+    pollTimerRef.current = setInterval(() => {
+      fetchPriceRest(formattedSymbol);
+    }, 3000);
 
     return () => {
+      clearTimeout(initTimer);
       if (ws) {
         ws.close();
       }
@@ -223,7 +264,20 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
         clearInterval(pollTimerRef.current);
       }
     };
-  }, [isActive, formattedSymbol, checkTargetReached]);
+  }, [isActive, formattedSymbol, checkTargetReached, fetchPriceRest]);
+
+  // Save custom symbol
+  const handleSaveCustomSymbol = (sym: string) => {
+    const clean = sym.trim().toUpperCase().replace(/[^a-zA-Z0-9]/g, '');
+    if (clean && onChangeBinanceSymbol) {
+      const finalSymbol = clean.endsWith('USDT') || clean.endsWith('USDC') ? clean : `${clean}USDT`;
+      onChangeBinanceSymbol(finalSymbol);
+      setIsEditingSymbol(false);
+      setErrorMessage(null);
+      setConnectionStatus('connecting');
+      fetchPriceRest(finalSymbol);
+    }
+  };
 
   // Determine display status
   const displayStatus = !isActive ? 'disconnected' : connectionStatus;
@@ -239,7 +293,7 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
 
   return (
     <div className="rounded-2xl border transition-all duration-200 overflow-hidden bg-white/70 dark:bg-slate-900/70 border-slate-200 dark:border-slate-800 shadow-sm">
-      {/* Top Banner / Toggle Bar */}
+      {/* Top Banner / Master Toggle Bar */}
       <div className="p-3.5 flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-2.5">
           <div
@@ -318,6 +372,96 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
             </div>
           )}
 
+          {/* Symbol Selector & Quick Pairs */}
+          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                <span>زوج بينانس المربوط:</span>
+                <span className="font-mono text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                  {formattedSymbol}
+                </span>
+              </span>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomInputSymbol(formattedSymbol.replace('USDT', ''));
+                  setIsEditingSymbol(!isEditingSymbol);
+                }}
+                className="text-[10px] text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <Edit2 className="w-3 h-3" />
+                <span>{isEditingSymbol ? 'إلغاء' : 'تغيير الرمز'}</span>
+              </button>
+            </div>
+
+            {/* Custom Symbol Input */}
+            {isEditingSymbol ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSaveCustomSymbol(customInputSymbol);
+                }}
+                className="flex items-center gap-2 pt-1"
+              >
+                <input
+                  type="text"
+                  value={customInputSymbol}
+                  onChange={(e) => setCustomInputSymbol(e.target.value.toUpperCase())}
+                  placeholder="مثال: SOL أو PEPE"
+                  className="flex-1 h-8 px-2.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold uppercase focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  dir="ltr"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="px-3 h-8 bg-amber-500 text-slate-950 font-bold text-xs rounded-lg hover:bg-amber-400 transition cursor-pointer"
+                >
+                  حفظ
+                </button>
+              </form>
+            ) : (
+              /* Popular quick symbols */
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                <span className="text-[10px] text-slate-400">سريع:</span>
+                {POPULAR_SYMBOLS.map((sym) => {
+                  const fullPair = `${sym}USDT`;
+                  const isCurrent = formattedSymbol === fullPair;
+                  return (
+                    <button
+                      key={sym}
+                      type="button"
+                      onClick={() => handleSaveCustomSymbol(sym)}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition cursor-pointer ${
+                        isCurrent
+                          ? 'bg-amber-500 text-slate-950 font-bold border-amber-500 shadow-sm'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-400'
+                      }`}
+                    >
+                      {sym}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Error Message if Symbol is invalid */}
+          {errorMessage && (
+            <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+              <div className="flex-1 text-[11px] leading-tight">{errorMessage}</div>
+              <button
+                type="button"
+                onClick={() => fetchPriceRest(formattedSymbol)}
+                className="p-1 rounded hover:bg-rose-500/20 text-rose-600 cursor-pointer"
+                title="إعادة المحاولة"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Live Price Display Card */}
           <div className="p-3 rounded-xl bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
             <div className="space-y-1">
@@ -325,8 +469,17 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
                 <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300">
                   {formattedSymbol}
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400">
-                  {displayStatus === 'connected' ? '🟢 متصل ببينانس' : displayStatus === 'connecting' ? '🟡 جاري الاتصال...' : '🔴 خطأ بالاتصال'}
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                  {displayStatus === 'connected' ? (
+                    <><span>🟢 متصل ببينانس</span></>
+                  ) : displayStatus === 'connecting' ? (
+                    <>
+                      <RefreshCw className="w-2.5 h-2.5 animate-spin text-amber-500" />
+                      <span>جاري الاتصال...</span>
+                    </>
+                  ) : (
+                    <><span>🔴 خطأ بالاتصال</span></>
+                  )}
                 </span>
                 {priceChange24h !== null && (
                   <span

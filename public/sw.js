@@ -1,5 +1,5 @@
 // Service Worker for "حاسبة الفروقات السعرية" PWA
-const CACHE_NAME = 'price-calc-v0-cache-v3';
+const CACHE_NAME = 'price-calc-v0-cache-v4';
 
 const STATIC_ASSETS = [
   '/',
@@ -53,7 +53,8 @@ self.addEventListener('fetch', (event) => {
   if (
     url.pathname.includes('webpack') ||
     url.pathname.includes('hot-update') ||
-    url.pathname.includes('__next')
+    url.pathname.includes('__next') ||
+    url.pathname.startsWith('/api/')
   ) {
     return;
   }

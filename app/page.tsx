@@ -282,6 +282,8 @@ export default function CalculatorPage() {
             {/* Section 0: Live Monitoring & Alerts from Binance (وضع المراقبة اللحظية والتنبيهات) */}
             <LiveMonitoringSection
               currencyName={activeCurrency.name}
+              binanceSymbol={activeCurrency.binanceSymbol}
+              onChangeBinanceSymbol={(sym) => updateActiveCurrency({ binanceSymbol: sym })}
               isActive={Boolean(activeCurrency.isMonitoringActive)}
               onToggleActive={(active) => updateActiveCurrency({ isMonitoringActive: active })}
               targetPrice={activeCurrency.targetPrice || ''}
@@ -298,6 +300,7 @@ export default function CalculatorPage() {
                   : undefined
               }
             />
+
 
             {/* Section 1: Trade Data (بيانات الصفقة) */}
             <TradeDataSection
