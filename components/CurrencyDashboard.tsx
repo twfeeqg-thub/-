@@ -1,25 +1,19 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { CurrencyItem, MAX_CURRENCIES, FeeCalculationMethod } from '@/types/currency';
-import { calculateAll, formatCurrencyPrice, formatCompactPrice, formatPercent, formatUSDT } from '@/lib/calculator';
+import { calculateAll, formatCompactPrice, formatPercent } from '@/lib/calculator';
 import { 
   Plus, 
   Trash2, 
-  TrendingUp, 
-  TrendingDown, 
   ArrowLeft, 
   Coins, 
   Target, 
-  Bell,
+  Bell, 
   AlertCircle,
   SlidersHorizontal,
-  ChevronUp,
-  ChevronDown,
-  X,
-  Check,
-  Equal,
-  Sparkles
+  GripVertical,
+  X
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -29,7 +23,7 @@ interface CurrencyDashboardProps {
   onSelectCurrency: (id: string) => void;
   onAddCurrency: (name: string) => void;
   onDeleteCurrency: (id: string) => void;
-  onMoveCurrency: (id: string, direction: 'up' | 'down') => void;
+  onReorderCurrencies: (newCurrencies: CurrencyItem[]) => void;
   onOpenSettings: () => void;
   hasDefaultsSaved: boolean;
   defaultFeeMethod?: FeeCalculationMethod;
@@ -40,7 +34,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
   onSelectCurrency,
   onAddCurrency,
   onDeleteCurrency,
-  onMoveCurrency,
+  onReorderCurrencies,
   onOpenSettings,
   hasDefaultsSaved,
   defaultFeeMethod = 'cumulative',
@@ -49,6 +43,23 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
   const [newCurrencyName, setNewCurrencyName] = useState('');
   const [currencyToDelete, setCurrencyToDelete] = useState<CurrencyItem | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Long-press Drag and Drop state
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const startCoordsRef = useRef<{ x: number; y: number } | null>(null);
+  const isDraggingActiveRef = useRef<boolean>(false);
+  const justDraggedRef = useRef<boolean>(false);
+  const currentCurrenciesRef = useRef<CurrencyItem[]>(currencies);
+  const onReorderCurrenciesRef = useRef(onReorderCurrencies);
+
+  useEffect(() => {
+    currentCurrenciesRef.current = currencies;
+  }, [currencies]);
+
+  useEffect(() => {
+    onReorderCurrenciesRef.current = onReorderCurrencies;
+  }, [onReorderCurrencies]);
 
   const isMaxReached = currencies.length >= MAX_CURRENCIES;
 
@@ -75,27 +86,151 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
     setErrorMsg('');
   };
 
-  const quickCoinSuggestions = ['BTC', 'ETH', 'SOL', 'XRP', 'TAO', 'WLD', 'SUI', 'BNB'];
+  const quickCoinSuggestions = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'NEAR', 'SUI', 'TAO'];
+
+  // Start pointer/touch down: initiate 280ms long-press detection
+  const handlePointerDown = (e: React.PointerEvent, currency: CurrencyItem) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('a') || target.closest('input')) {
+      return;
+    }
+
+    startCoordsRef.current = { x: e.clientX, y: e.clientY };
+    isDraggingActiveRef.current = false;
+
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+
+    timerRef.current = setTimeout(() => {
+      isDraggingActiveRef.current = true;
+      setDraggedId(currency.id);
+      try {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate(40);
+        }
+      } catch {
+        // Ignore
+      }
+    }, 280);
+  };
+
+  // Window event listeners for seamless touch and mouse drag across the screen
+  useEffect(() => {
+    if (!draggedId) return;
+
+    const handleMoveInternal = (clientX: number, clientY: number) => {
+      if (!startCoordsRef.current) return;
+
+      if (!isDraggingActiveRef.current) {
+        const dx = Math.abs(clientX - startCoordsRef.current.x);
+        const dy = Math.abs(clientY - startCoordsRef.current.y);
+        if (dx > 10 || dy > 10) {
+          if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+          }
+        }
+        return;
+      }
+
+      // Active drag: find element under point and swap if over a different currency card
+      const elem = document.elementFromPoint(clientX, clientY);
+      if (!elem) return;
+      const cardElem = elem.closest('[data-currency-id]');
+      if (cardElem) {
+        const targetId = cardElem.getAttribute('data-currency-id');
+        const activeId = draggedId;
+        if (targetId && activeId && targetId !== activeId) {
+          const fromIdx = currentCurrenciesRef.current.findIndex((c) => c.id === activeId);
+          const toIdx = currentCurrenciesRef.current.findIndex((c) => c.id === targetId);
+          if (fromIdx !== -1 && toIdx !== -1 && fromIdx !== toIdx) {
+            const next = [...currentCurrenciesRef.current];
+            const [moved] = next.splice(fromIdx, 1);
+            next.splice(toIdx, 0, moved);
+            onReorderCurrenciesRef.current(next);
+            try {
+              if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                navigator.vibrate(25);
+              }
+            } catch {
+              // Ignore
+            }
+          }
+        }
+      }
+    };
+
+    const handleEndInternal = () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+
+      if (isDraggingActiveRef.current) {
+        justDraggedRef.current = true;
+        setTimeout(() => {
+          justDraggedRef.current = false;
+        }, 200);
+      }
+
+      isDraggingActiveRef.current = false;
+      startCoordsRef.current = null;
+      setDraggedId(null);
+    };
+
+    const onWindowPointerMove = (e: PointerEvent) => {
+      handleMoveInternal(e.clientX, e.clientY);
+    };
+
+    const onWindowTouchMove = (e: TouchEvent) => {
+      if (e.touches && e.touches[0]) {
+        if (isDraggingActiveRef.current && e.cancelable) {
+          e.preventDefault();
+        }
+        handleMoveInternal(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+
+    const onWindowPointerUp = () => {
+      handleEndInternal();
+    };
+
+    const onWindowTouchEnd = () => {
+      handleEndInternal();
+    };
+
+    window.addEventListener('pointermove', onWindowPointerMove, { passive: false });
+    window.addEventListener('touchmove', onWindowTouchMove, { passive: false });
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('pointercancel', onWindowPointerUp);
+    window.addEventListener('touchend', onWindowTouchEnd);
+    window.addEventListener('touchcancel', onWindowTouchEnd);
+
+    return () => {
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('touchmove', onWindowTouchMove);
+      window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('pointercancel', onWindowPointerUp);
+      window.removeEventListener('touchend', onWindowTouchEnd);
+      window.removeEventListener('touchcancel', onWindowTouchEnd);
+    };
+  }, [draggedId]);
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-5 animate-in fade-in duration-200">
-      {/* Top Header Card */}
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-md backdrop-blur-md">
+    <div className="w-full max-w-4xl flex flex-col gap-4 animate-in fade-in duration-200">
+      {/* Top Header */}
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-2xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200/80 dark:border-slate-800 shadow-xs">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-500 font-black text-sm shadow-xs">
-            <Coins className="w-5 h-5 text-amber-500" />
+          <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500 shadow-inner">
+            <Coins className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100">
-                حاسبة الفروقات السعرية
-              </h1>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                V0
-              </span>
-            </div>
+            <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              لوحة متابعة وحساب العملات
+            </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              لوحة العملات المراقبة • إدارة حتى {MAX_CURRENCIES} عملة
+              إدارة صفقاتك، مراقبة سعر التعادل، وتعديل ترتيب العملات بالضغط المطول والسحب
             </p>
           </div>
         </div>
@@ -195,8 +330,10 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
         </div>
       ) : (
         /* Currencies Grid */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {currencies.map((currency, index) => {
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 select-none">
+          {currencies.map((currency) => {
+            const isDraggingThis = draggedId === currency.id;
+
             // Calculate summary for this currency card using chosen feeMethod
             const calc = calculateAll(
               {
@@ -226,12 +363,29 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
             return (
               <div
                 key={currency.id}
-                onClick={() => onSelectCurrency(currency.id)}
-                className="group relative flex flex-col justify-between p-3.5 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 hover:border-amber-500/60 dark:hover:border-amber-500/60 shadow-xs hover:shadow-md transition-all cursor-pointer text-right gap-2.5"
+                data-currency-id={currency.id}
+                onPointerDown={(e) => handlePointerDown(e, currency)}
+                onClick={() => {
+                  if (justDraggedRef.current) return;
+                  onSelectCurrency(currency.id);
+                }}
+                className={`group relative flex flex-col justify-between p-3.5 rounded-2xl border shadow-xs transition-all duration-150 cursor-pointer text-right gap-2.5 touch-manipulation ${
+                  isDraggingThis
+                    ? 'ring-2 ring-amber-500 shadow-2xl scale-[1.03] z-30 opacity-95 bg-amber-50/70 dark:bg-amber-950/40 border-amber-500 cursor-grabbing'
+                    : 'bg-white dark:bg-slate-900/90 border-slate-200 dark:border-slate-800 hover:border-amber-500/60 dark:hover:border-amber-500/60 hover:shadow-md'
+                }`}
               >
-                {/* السطر الأول: رأس البطاقة (الاسم، المبلغ، قيمة التنبيه، أزرار الترتيب، رابط الفتح، زر الحذف) */}
+                {/* السطر الأول: رأس البطاقة (مقبض السحب، الاسم، المبلغ، قيمة التنبيه، رابط الفتح، زر الحذف) */}
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {/* مقبض سحب خفيف عند التحريك */}
+                    <div 
+                      className="cursor-grab active:cursor-grabbing text-slate-300 dark:text-slate-600 group-hover:text-amber-500 transition-colors p-0.5"
+                      title="اضغط مطولاً واسحب للتحريك صعوداً وهبوطاً"
+                    >
+                      <GripVertical className="w-3.5 h-3.5" />
+                    </div>
+
                     <span className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono font-black text-[11px] flex items-center justify-center border border-amber-500/30 shrink-0">
                       {currency.name.slice(0, 3)}
                     </span>
@@ -261,39 +415,6 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
                         <span className="text-[9px] opacity-75">{currency.targetDirection === 'below' ? '≤' : '≥'}</span>
                       </span>
                     ) : null}
-
-                    {/* أزرار إعادة الترتيب والتحريك لأعلى ولأسفل */}
-                    <div 
-                      className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700/60"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => onMoveCurrency(currency.id, 'up')}
-                        disabled={index === 0}
-                        className={`p-0.5 rounded transition ${
-                          index === 0
-                            ? 'text-slate-300 dark:text-slate-600 opacity-30 cursor-not-allowed'
-                            : 'text-slate-600 dark:text-slate-300 hover:text-amber-500 hover:bg-white dark:hover:bg-slate-700 cursor-pointer active:scale-90'
-                        }`}
-                        title="تحريك لأعلى"
-                      >
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onMoveCurrency(currency.id, 'down')}
-                        disabled={index === currencies.length - 1}
-                        className={`p-0.5 rounded transition ${
-                          index === currencies.length - 1
-                            ? 'text-slate-300 dark:text-slate-600 opacity-30 cursor-not-allowed'
-                            : 'text-slate-600 dark:text-slate-300 hover:text-amber-500 hover:bg-white dark:hover:bg-slate-700 cursor-pointer active:scale-90'
-                        }`}
-                        title="تحريك لأسفل"
-                      >
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
 
                     <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold flex items-center gap-0.5 group-hover:translate-x-[-2px] transition-transform">
                       <span>فتح</span>
@@ -359,8 +480,63 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
                 </div>
               </div>
             );
-
           })}
+        </div>
+      )}
+
+      {/* Reorder hint */}
+      {currencies.length > 1 && (
+        <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-slate-400 dark:text-slate-500">
+          <GripVertical className="w-3.5 h-3.5 opacity-60" />
+          <span>يمكنك الضغط مطولاً على أي بطاقة واسحبها لإعادة ترتيب العملات صعوداً وهبوطاً</span>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {currencyToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div 
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5 text-right flex flex-col gap-4 animate-in zoom-in-95 duration-150"
+            dir="rtl"
+          >
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  حذف عملة {currencyToDelete.name}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  هذا الإجراء سيحذف العملة وجميع بياناتها المسجلة
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+              هل أنت متأكد من رغبتك في حذف عملة <strong className="font-mono text-slate-900 dark:text-slate-100 font-bold">{currencyToDelete.name}</strong>؟ لا يمكن التراجع عن هذا الإجراء.
+            </p>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteCurrency(currencyToDelete.id);
+                  setCurrencyToDelete(null);
+                }}
+                className="flex-1 py-2 px-3 rounded-xl bg-rose-600 text-white font-bold text-xs hover:bg-rose-500 transition cursor-pointer active:scale-95"
+              >
+                تأكيد الحذف
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrencyToDelete(null)}
+                className="py-2 px-4 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -368,12 +544,14 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
           <div 
-            className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-2xl space-y-4 text-right"
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5 text-right flex flex-col gap-4 animate-in zoom-in-95 duration-150"
             dir="rtl"
           >
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <Coins className="w-5 h-5 text-amber-500" />
+                <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500 font-bold">
+                  <Coins className="w-4 h-4" />
+                </div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                   إضافة عملة جديدة
                 </h3>
@@ -449,51 +627,6 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {currencyToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div 
-            className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-2xl space-y-4 text-right"
-            dir="rtl"
-          >
-            <div className="flex items-center gap-2 text-rose-500 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <Trash2 className="w-5 h-5" />
-              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                تأكيد حذف العملة
-              </h3>
-            </div>
-
-            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              هل أنت متأكد من رغبتك في حذف عملة <strong className="text-amber-500 font-mono">[{currencyToDelete.name}]</strong>؟
-              <br />
-              <span className="text-[11px] text-slate-400 mt-1 block">
-                سيتم مسح بيانات هذه العملة فقط، ولن تتأثر العملات الأخرى.
-              </span>
-            </p>
-
-            <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => {
-                  onDeleteCurrency(currencyToDelete.id);
-                  setCurrencyToDelete(null);
-                }}
-                className="flex-1 py-2 px-3 rounded-xl bg-rose-600 text-white font-bold text-xs hover:bg-rose-500 transition cursor-pointer active:scale-95"
-              >
-                تأكيد الحذف
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrencyToDelete(null)}
-                className="py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
-              >
-                إلغاء
-              </button>
-            </div>
           </div>
         </div>
       )}

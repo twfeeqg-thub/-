@@ -78,23 +78,10 @@ export default function CalculatorPage() {
     }
   }, []);
 
-  // Move currency card up or down
-  const handleMoveCurrency = useCallback((id: string, direction: 'up' | 'down') => {
-    setCurrencies((prev) => {
-      const index = prev.findIndex((c) => c.id === id);
-      if (index === -1) return prev;
-      if (direction === 'up' && index === 0) return prev;
-      if (direction === 'down' && index === prev.length - 1) return prev;
-
-      const targetIndex = direction === 'up' ? index - 1 : index + 1;
-      const next = [...prev];
-      const temp = next[index];
-      next[index] = next[targetIndex];
-      next[targetIndex] = temp;
-
-      persistCurrencies(next);
-      return next;
-    });
+  // Reorder currencies via drag & drop
+  const handleReorderCurrencies = useCallback((newCurrencies: CurrencyItem[]) => {
+    setCurrencies(newCurrencies);
+    persistCurrencies(newCurrencies);
   }, [persistCurrencies]);
 
   // Add currency (max 25)
@@ -295,7 +282,7 @@ export default function CalculatorPage() {
             onSelectCurrency={(id) => setActiveCurrencyId(id)}
             onAddCurrency={handleAddCurrency}
             onDeleteCurrency={handleDeleteCurrency}
-            onMoveCurrency={handleMoveCurrency}
+            onReorderCurrencies={handleReorderCurrencies}
             onOpenSettings={() => setIsSettingsOpen(true)}
             hasDefaultsSaved={hasDefaultsSaved}
             defaultFeeMethod={defaultFees.feeMethod || 'cumulative'}
