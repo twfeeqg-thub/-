@@ -8,12 +8,14 @@ interface BreakEvenSectionProps {
   hasValidBase: boolean;
   percentTrack: CalculationTrackResult;
   fixedTrack: CalculationTrackResult;
+  feeMethod?: 'cumulative' | 'separate';
 }
 
 export const BreakEvenSection: React.FC<BreakEvenSectionProps> = ({
   hasValidBase,
   percentTrack,
   fixedTrack,
+  feeMethod = 'cumulative',
 }) => {
   const showPercent = percentTrack.hasTrack;
   const showFixed = fixedTrack.hasTrack;
@@ -45,7 +47,10 @@ export const BreakEvenSection: React.FC<BreakEvenSectionProps> = ({
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
           <Target className="w-3.5 h-3.5 text-amber-500" />
-          سعر التعادل (Break-Even)
+          <span>سعر التعادل (Break-Even)</span>
+          <span className="text-[10px] font-normal px-1.5 py-0.2 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-300 border border-amber-500/20">
+            {feeMethod === 'separate' ? 'حساب منفصل' : 'حساب تراكمي'}
+          </span>
         </h2>
         <span className="text-[10px] text-amber-700 dark:text-amber-400/80 font-medium">
           الحد الأدنى لتغطية التكاليف
@@ -61,7 +66,7 @@ export const BreakEvenSection: React.FC<BreakEvenSectionProps> = ({
                 سعر التعادل حسب النسبة (%)
               </span>
               <span className="text-[9px] px-1.5 py-0.5 rounded-sm bg-amber-500/20 text-amber-700 dark:text-amber-300 font-mono">
-                مسار النسبة
+                {feeMethod === 'separate' ? 'نسبة منفصلة' : 'نسبة تراكمية'}
               </span>
             </div>
 
@@ -75,7 +80,9 @@ export const BreakEvenSection: React.FC<BreakEvenSectionProps> = ({
                 </div>
 
                 <div className="mt-2 pt-2 border-t border-amber-500/20 flex items-center justify-between text-[10px] text-amber-700/80 dark:text-amber-300/80 font-mono">
-                  <span>الكمية المشتراة بعد الخصم:</span>
+                  <span>
+                    {feeMethod === 'separate' ? 'الكمية المشتراة (كاملة):' : 'الكمية المشتراة بعد الخصم:'}
+                  </span>
                   <span dir="ltr">{formatCurrencyPrice(percentTrack.quantity)}</span>
                 </div>
               </>
@@ -96,7 +103,7 @@ export const BreakEvenSection: React.FC<BreakEvenSectionProps> = ({
                 سعر التعادل حسب المبلغ (USDT)
               </span>
               <span className="text-[9px] px-1.5 py-0.5 rounded-sm bg-amber-500/20 text-amber-700 dark:text-amber-300 font-mono">
-                مسار المبلغ
+                {feeMethod === 'separate' ? 'مبلغ منفصل' : 'مبلغ تراكمي'}
               </span>
             </div>
 
@@ -110,7 +117,9 @@ export const BreakEvenSection: React.FC<BreakEvenSectionProps> = ({
                 </div>
 
                 <div className="mt-2 pt-2 border-t border-amber-500/20 flex items-center justify-between text-[10px] text-amber-700/80 dark:text-amber-300/80 font-mono">
-                  <span>الكمية المشتراة بعد الخصم:</span>
+                  <span>
+                    {feeMethod === 'separate' ? 'الكمية المشتراة (كاملة):' : 'الكمية المشتراة بعد الخصم:'}
+                  </span>
                   <span dir="ltr">{formatCurrencyPrice(fixedTrack.quantity)}</span>
                 </div>
               </>

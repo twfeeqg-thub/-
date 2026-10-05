@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { CurrencyItem, MAX_CURRENCIES } from '@/types/currency';
+import { CurrencyItem, MAX_CURRENCIES, FeeCalculationMethod } from '@/types/currency';
 import { calculateAll, formatCurrencyPrice, formatCompactPrice, formatPercent, formatUSDT } from '@/lib/calculator';
 import { 
   Plus, 
@@ -14,6 +14,8 @@ import {
   Bell,
   AlertCircle,
   SlidersHorizontal,
+  ChevronUp,
+  ChevronDown,
   X,
   Check,
   Equal,
@@ -27,8 +29,10 @@ interface CurrencyDashboardProps {
   onSelectCurrency: (id: string) => void;
   onAddCurrency: (name: string) => void;
   onDeleteCurrency: (id: string) => void;
+  onMoveCurrency: (id: string, direction: 'up' | 'down') => void;
   onOpenSettings: () => void;
   hasDefaultsSaved: boolean;
+  defaultFeeMethod?: FeeCalculationMethod;
 }
 
 export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
@@ -36,8 +40,10 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
   onSelectCurrency,
   onAddCurrency,
   onDeleteCurrency,
+  onMoveCurrency,
   onOpenSettings,
   hasDefaultsSaved,
+  defaultFeeMethod = 'cumulative',
 }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newCurrencyName, setNewCurrencyName] = useState('');
@@ -94,11 +100,21 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
           </div>
         </div>
 
-        {/* Header Tools: PWA, ThemeToggle, Settings, Counter */}
-        <div className="flex items-center gap-2 self-end sm:self-center">
+        {/* Header Tools: PWA, ThemeToggle, Fee Method, Settings, Counter */}
+        <div className="flex items-center gap-1.5 sm:gap-2 self-end sm:self-center">
           <PWAInstallButton />
           
           <ThemeToggle />
+
+          {/* Fee calculation method indicator button */}
+          <button
+            onClick={onOpenSettings}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition cursor-pointer bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-amber-500 hover:text-amber-600 dark:hover:text-amber-400"
+            title="طريقة حساب الرسوم الحالية (اضغط لتغييرها من الإعدادات)"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${defaultFeeMethod === 'separate' ? 'bg-sky-500' : 'bg-amber-500'}`}></span>
+            <span>{defaultFeeMethod === 'separate' ? 'منفصل' : 'تراكمي'}</span>
+          </button>
 
           <button
             onClick={onOpenSettings}
@@ -180,8 +196,8 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
       ) : (
         /* Currencies Grid */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {currencies.map((currency) => {
-            // Calculate summary for this currency card
+          {currencies.map((currency, index) => {
+            // Calculate summary for this currency card using chosen feeMethod
             const calc = calculateAll(
               {
                 entryPrice: currency.entryPrice,
@@ -190,6 +206,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
                 exitFeePercent: currency.exitFeePercent,
                 entryFeeFixed: currency.entryFeeFixed,
                 exitFeeFixed: currency.exitFeeFixed,
+                feeMethod: currency.feeMethod || defaultFeeMethod,
               },
               currency.testPrices
             );
@@ -212,7 +229,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
                 onClick={() => onSelectCurrency(currency.id)}
                 className="group relative flex flex-col justify-between p-3.5 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 hover:border-amber-500/60 dark:hover:border-amber-500/60 shadow-xs hover:shadow-md transition-all cursor-pointer text-right gap-2.5"
               >
-                {/* السطر الأول: رأس البطاقة (الاسم، المبلغ، رابط الفتح، زر الحذف) */}
+                {/* السطر الأول: رأس البطاقة (الاسم، المبلغ، قيمة التنبيه، أزرار الترتيب، رابط الفتح، زر الحذف) */}
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono font-black text-[11px] flex items-center justify-center border border-amber-500/30 shrink-0">
@@ -244,6 +261,39 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
                         <span className="text-[9px] opacity-75">{currency.targetDirection === 'below' ? '≤' : '≥'}</span>
                       </span>
                     ) : null}
+
+                    {/* أزرار إعادة الترتيب والتحريك لأعلى ولأسفل */}
+                    <div 
+                      className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700/60"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onMoveCurrency(currency.id, 'up')}
+                        disabled={index === 0}
+                        className={`p-0.5 rounded transition ${
+                          index === 0
+                            ? 'text-slate-300 dark:text-slate-600 opacity-30 cursor-not-allowed'
+                            : 'text-slate-600 dark:text-slate-300 hover:text-amber-500 hover:bg-white dark:hover:bg-slate-700 cursor-pointer active:scale-90'
+                        }`}
+                        title="تحريك لأعلى"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onMoveCurrency(currency.id, 'down')}
+                        disabled={index === currencies.length - 1}
+                        className={`p-0.5 rounded transition ${
+                          index === currencies.length - 1
+                            ? 'text-slate-300 dark:text-slate-600 opacity-30 cursor-not-allowed'
+                            : 'text-slate-600 dark:text-slate-300 hover:text-amber-500 hover:bg-white dark:hover:bg-slate-700 cursor-pointer active:scale-90'
+                        }`}
+                        title="تحريك لأسفل"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
 
                     <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold flex items-center gap-0.5 group-hover:translate-x-[-2px] transition-transform">
                       <span>فتح</span>

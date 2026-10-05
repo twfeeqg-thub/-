@@ -38,7 +38,7 @@ export default function CalculatorPage() {
     exitFeeFixed: '',
   });
 
-  // Currencies list (max 10)
+  // Currencies list (max 25)
   const [currencies, setCurrencies] = useState<CurrencyItem[]>([]);
   // Currently active currency ID (null = showing Currency Dashboard)
   const [activeCurrencyId, setActiveCurrencyId] = useState<string | null>(null);
@@ -78,7 +78,26 @@ export default function CalculatorPage() {
     }
   }, []);
 
-  // Add currency (max 10)
+  // Move currency card up or down
+  const handleMoveCurrency = useCallback((id: string, direction: 'up' | 'down') => {
+    setCurrencies((prev) => {
+      const index = prev.findIndex((c) => c.id === id);
+      if (index === -1) return prev;
+      if (direction === 'up' && index === 0) return prev;
+      if (direction === 'down' && index === prev.length - 1) return prev;
+
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[targetIndex];
+      next[targetIndex] = temp;
+
+      persistCurrencies(next);
+      return next;
+    });
+  }, [persistCurrencies]);
+
+  // Add currency (max 25)
   const handleAddCurrency = (name: string) => {
     if (currencies.length >= MAX_CURRENCIES) return;
 
@@ -92,6 +111,7 @@ export default function CalculatorPage() {
       exitFeePercent: defaultFees.exitFeePercent || '',
       entryFeeFixed: defaultFees.entryFeeFixed || '',
       exitFeeFixed: defaultFees.exitFeeFixed || '',
+      feeMethod: defaultFees.feeMethod || 'cumulative',
       testPrices: [''],
     };
 
@@ -118,17 +138,27 @@ export default function CalculatorPage() {
     return currencies.find((c) => c.id === activeCurrencyId) || null;
   }, [currencies, activeCurrencyId]);
 
-  // Update fields of the currently active currency
+  // Update fields of the currently active currency (moves card to top if monitoring is activated)
   const updateActiveCurrency = useCallback((fields: Partial<CurrencyItem>) => {
     if (!activeCurrencyId) return;
 
     setCurrencies((prev) => {
-      const next = prev.map((c) => {
+      let next = prev.map((c) => {
         if (c.id === activeCurrencyId) {
           return { ...c, ...fields };
         }
         return c;
       });
+
+      // إذا تم تفعيل نظام المراقبة لهذه العملة، انقلها إلى أعلى القائمة مباشرة
+      if (fields.isMonitoringActive === true) {
+        const targetIdx = next.findIndex((c) => c.id === activeCurrencyId);
+        if (targetIdx > 0) {
+          const [activatedItem] = next.splice(targetIdx, 1);
+          next = [activatedItem, ...next];
+        }
+      }
+
       persistCurrencies(next);
       return next;
     });
@@ -144,6 +174,7 @@ export default function CalculatorPage() {
       exitFeePercent: defaultFees.exitFeePercent || '',
       entryFeeFixed: defaultFees.entryFeeFixed || '',
       exitFeeFixed: defaultFees.exitFeeFixed || '',
+      feeMethod: defaultFees.feeMethod || 'cumulative',
       testPrices: [''],
     });
   };
@@ -208,9 +239,10 @@ export default function CalculatorPage() {
       exitFeePercent: activeCurrency.exitFeePercent,
       entryFeeFixed: activeCurrency.entryFeeFixed,
       exitFeeFixed: activeCurrency.exitFeeFixed,
+      feeMethod: activeCurrency.feeMethod || defaultFees.feeMethod || 'cumulative',
     };
     return calculateAll(inputs, activeCurrency.testPrices);
-  }, [activeCurrency]);
+  }, [activeCurrency, defaultFees.feeMethod]);
 
   // Save or clear default fees
   const handleSaveDefaults = (newDefaults: DefaultFeeSettings) => {
@@ -263,8 +295,10 @@ export default function CalculatorPage() {
             onSelectCurrency={(id) => setActiveCurrencyId(id)}
             onAddCurrency={handleAddCurrency}
             onDeleteCurrency={handleDeleteCurrency}
+            onMoveCurrency={handleMoveCurrency}
             onOpenSettings={() => setIsSettingsOpen(true)}
             hasDefaultsSaved={hasDefaultsSaved}
+            defaultFeeMethod={defaultFees.feeMethod || 'cumulative'}
           />
         ) : (
           /* View 2: Full Calculator for the Active Currency (حاسبة العملة المحددة) */
@@ -329,6 +363,7 @@ export default function CalculatorPage() {
               hasValidBase={calculationResult.hasValidBaseInputs}
               percentTrack={calculationResult.percentTrack}
               fixedTrack={calculationResult.fixedTrack}
+              feeMethod={activeCurrency.feeMethod || defaultFees.feeMethod || 'cumulative'}
             />
 
             {/* Section 3: Test Prices & Linked Results (أسعار الاختبار ونتائجها) */}

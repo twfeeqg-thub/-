@@ -2,12 +2,14 @@
 
 import React, { useState } from 'react';
 import { X, Check, Trash2, SlidersHorizontal, Info } from 'lucide-react';
+import { FeeCalculationMethod } from '@/types/currency';
 
 export interface DefaultFeeSettings {
   entryFeePercent: string;
   exitFeePercent: string;
   entryFeeFixed: string;
   exitFeeFixed: string;
+  feeMethod?: FeeCalculationMethod; // 'cumulative' | 'separate'
 }
 
 interface SettingsModalProps {
@@ -25,7 +27,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveDefaults,
   onClearDefaults,
 }) => {
-  const [form, setForm] = useState<DefaultFeeSettings>({ ...currentSettings });
+  const [form, setForm] = useState<DefaultFeeSettings>({ 
+    ...currentSettings,
+    feeMethod: currentSettings.feeMethod || 'cumulative'
+  });
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   if (!isOpen) return null;
@@ -47,20 +52,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       exitFeePercent: '',
       entryFeeFixed: '',
       exitFeeFixed: '',
+      feeMethod: 'cumulative',
     });
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
       <div 
-        className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 shadow-2xl p-5 text-right flex flex-col gap-4 animate-in zoom-in-95 duration-150"
+        className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 shadow-2xl p-5 text-right flex flex-col gap-4 animate-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto"
         dir="rtl"
       >
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="w-4 h-4 text-amber-500" />
             <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-              التكاليف الافتراضية الثابتة
+              إعدادات الرسوم وحساب الفروقات
             </h2>
           </div>
           <button
@@ -74,13 +80,67 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="flex items-start gap-2 bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
           <Info className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
           <span>
-            تُحفظ تكاليف الدخول والخروج فقط لملئها تلقائياً عند فتح حاسبة أي عملة. لا يتم حفظ أسعار العملات أو مبالغ الصفقات تلقائياً.
+            تُحفظ تكاليف الدخول والخروج وطريقة الحساب لتطبيقها تلقائياً عند فتح حاسبة أي عملة لتوفير أعلى دقة ممكنة.
           </span>
         </div>
 
         <form onSubmit={handleSave} className="space-y-3.5">
-          {/* Default Percentage Fees */}
+          {/* Method Selection: Cumulative vs Separate */}
           <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                طريقة حساب الرسوم
+              </span>
+              <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-bold">
+                {form.feeMethod === 'separate' ? 'منفصل (مستقل)' : 'تراكمي (مركّب)'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, feeMethod: 'cumulative' })}
+                className={`p-2.5 rounded-xl border text-right transition cursor-pointer flex flex-col justify-between gap-1.5 ${
+                  (form.feeMethod || 'cumulative') === 'cumulative'
+                    ? 'bg-amber-500/15 border-amber-500 text-slate-900 dark:text-slate-100 shadow-xs ring-1 ring-amber-500/30'
+                    : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold">تراكمي (مركّب)</span>
+                  {(form.feeMethod || 'cumulative') === 'cumulative' && (
+                    <Check className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                  خصم رسوم الشراء من كمية العملة، واقتطاع رسوم البيع من ناتج الصفقة.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, feeMethod: 'separate' })}
+                className={`p-2.5 rounded-xl border text-right transition cursor-pointer flex flex-col justify-between gap-1.5 ${
+                  form.feeMethod === 'separate'
+                    ? 'bg-amber-500/15 border-amber-500 text-slate-900 dark:text-slate-100 shadow-xs ring-1 ring-amber-500/30'
+                    : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold">منفصل (مستقل)</span>
+                  {form.feeMethod === 'separate' && (
+                    <Check className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                  الرسوم كبند مستقل دون إنقاص الكمية (مثل سداد الرسوم بـ BNB أو رصيد منفصل).
+                </p>
+              </button>
+            </div>
+          </div>
+
+          {/* Default Percentage Fees */}
+          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
               النسب المئوية الافتراضية (%)
             </span>
@@ -117,7 +177,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Default Fixed Fees */}
-          <div className="space-y-2">
+          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
             <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
               المبالغ الثابتة الافتراضية (USDT)
             </span>
@@ -165,14 +225,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   تم الحفظ بنجاح
                 </>
               ) : (
-                'حفظ كافتراضي'
+                'حفظ الإعدادات'
               )}
             </button>
             <button
               type="button"
               onClick={handleClear}
               className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
-              title="مسح الإعدادات الافتراضية"
+              title="إعادة ضبط للافتراضي"
             >
               <Trash2 className="w-4 h-4" />
             </button>

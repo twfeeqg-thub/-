@@ -14,6 +14,8 @@ export interface TrackInputs {
   // مسار المبلغ
   entryFeeFixed?: string; // Fbuy: مبلغ تكلفة الدخول (USDT)
   exitFeeFixed?: string; // Fsell: مبلغ تكلفة الخروج (USDT)
+  // طريقة حساب الرسوم (تراكمي أو منفصل)
+  feeMethod?: 'cumulative' | 'separate';
 }
 
 export interface TestPriceResult {
@@ -213,7 +215,8 @@ export function calculatePercentTrack(
   tradeAmount: number,
   entryFeePercentStr: string | undefined,
   exitFeePercentStr: string | undefined,
-  testPrices: string[]
+  testPrices: string[],
+  feeMethod: 'cumulative' | 'separate' = 'cumulative'
 ): CalculationTrackResult {
   // فحص هل المستخدم أدخل أي نسبة
   const hasEntry = entryFeePercentStr !== undefined && entryFeePercentStr.trim() !== '';
@@ -279,9 +282,19 @@ export function calculatePercentTrack(
   const B = bPercent / 100;
   const S = sPercent / 100;
 
-  // الحسابات
-  const quantity = (tradeAmount * (1 - B)) / entryPrice;
-  const breakEvenPrice = entryPrice / ((1 - B) * (1 - S));
+  // الحسابات بحسب طريقة حساب الرسوم (تراكمي أو منفصل)
+  let quantity: number;
+  let breakEvenPrice: number;
+
+  if (feeMethod === 'separate') {
+    // الطريقة المنفصلة: الرسوم تُدفع بشكل مستقل دون إنقاص كمية الأصل المشترى
+    quantity = tradeAmount / entryPrice;
+    breakEvenPrice = (entryPrice * (1 + B)) / (1 - S);
+  } else {
+    // الطريقة التراكمية (المركبة): رسوم الدخول تُقتطع من نفس الأصل المشترى
+    quantity = (tradeAmount * (1 - B)) / entryPrice;
+    breakEvenPrice = entryPrice / ((1 - B) * (1 - S));
+  }
 
   // نتائج أسعار الاختبار
   const testResults: TestPriceResult[] = [];
@@ -292,9 +305,19 @@ export function calculatePercentTrack(
     if (isNaN(P) || P <= 0) continue;
 
     const grossExit = quantity * P;
-    const exitCost = grossExit * S;
-    const netExit = grossExit - exitCost;
-    const netPnL = netExit - tradeAmount;
+    let netPnL: number;
+
+    if (feeMethod === 'separate') {
+      const entryCost = tradeAmount * B;
+      const exitCost = grossExit * S;
+      const netExit = grossExit - exitCost;
+      netPnL = netExit - tradeAmount - entryCost;
+    } else {
+      const exitCost = grossExit * S;
+      const netExit = grossExit - exitCost;
+      netPnL = netExit - tradeAmount;
+    }
+
     const pnlPercent = (netPnL / tradeAmount) * 100;
 
     // تحديد الحالة بدقة
@@ -329,20 +352,15 @@ export function calculatePercentTrack(
 
 /**
  * حساب مسار المبلغ الثابت
- * المعادلات المعتمدة:
- * Quantity = (A - Fbuy) / E
- * BreakEven = (A + Fsell) / Quantity
- * GrossExit = Quantity * P
- * NetExit = GrossExit - Fsell
- * NetPnL = NetExit - A
- * PnLPercent = NetPnL / A * 100
+ * المعادلات المعتمدة بحسب طريقة الرسوم (تراكمي أو منفصل)
  */
 export function calculateFixedTrack(
   entryPrice: number,
   tradeAmount: number,
   entryFeeFixedStr: string | undefined,
   exitFeeFixedStr: string | undefined,
-  testPrices: string[]
+  testPrices: string[],
+  feeMethod: 'cumulative' | 'separate' = 'cumulative'
 ): CalculationTrackResult {
   const hasEntry = entryFeeFixedStr !== undefined && entryFeeFixedStr.trim() !== '';
   const hasExit = exitFeeFixedStr !== undefined && exitFeeFixedStr.trim() !== '';
@@ -382,7 +400,7 @@ export function calculateFixedTrack(
     };
   }
 
-  if (fBuy >= tradeAmount) {
+  if (feeMethod === 'cumulative' && fBuy >= tradeAmount) {
     return {
       hasTrack: true,
       isValid: false,
@@ -393,8 +411,16 @@ export function calculateFixedTrack(
     };
   }
 
-  const quantity = (tradeAmount - fBuy) / entryPrice;
-  const breakEvenPrice = (tradeAmount + fSell) / quantity;
+  let quantity: number;
+  let breakEvenPrice: number;
+
+  if (feeMethod === 'separate') {
+    quantity = tradeAmount / entryPrice;
+    breakEvenPrice = (tradeAmount + fBuy + fSell) / quantity;
+  } else {
+    quantity = (tradeAmount - fBuy) / entryPrice;
+    breakEvenPrice = (tradeAmount + fSell) / quantity;
+  }
 
   const testResults: TestPriceResult[] = [];
   for (const pStr of testPrices) {
@@ -404,8 +430,15 @@ export function calculateFixedTrack(
     if (isNaN(P) || P <= 0) continue;
 
     const grossExit = quantity * P;
-    const netExit = grossExit - fSell;
-    const netPnL = netExit - tradeAmount;
+    let netPnL: number;
+
+    if (feeMethod === 'separate') {
+      netPnL = grossExit - tradeAmount - fBuy - fSell;
+    } else {
+      const netExit = grossExit - fSell;
+      netPnL = netExit - tradeAmount;
+    }
+
     const pnlPercent = (netPnL / tradeAmount) * 100;
 
     let status: 'profit' | 'loss' | 'breakeven';
@@ -438,7 +471,7 @@ export function calculateFixedTrack(
 }
 
 /**
- * حساب كامل يجمع المسارين بناءً على المدخلات
+ * حساب كامل يجمع المسارين بناءً على المدخلات وطريقة حساب الرسوم
  */
 export function calculateAll(
   inputs: TrackInputs,
@@ -467,12 +500,15 @@ export function calculateAll(
     };
   }
 
+  const method = inputs.feeMethod || 'cumulative';
+
   const percentTrack = calculatePercentTrack(
     baseValidation.entryPrice,
     baseValidation.tradeAmount,
     inputs.entryFeePercent,
     inputs.exitFeePercent,
-    testPrices
+    testPrices,
+    method
   );
 
   const fixedTrack = calculateFixedTrack(
@@ -480,7 +516,8 @@ export function calculateAll(
     baseValidation.tradeAmount,
     inputs.entryFeeFixed,
     inputs.exitFeeFixed,
-    testPrices
+    testPrices,
+    method
   );
 
   return {
