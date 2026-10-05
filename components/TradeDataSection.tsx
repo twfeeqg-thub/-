@@ -1,7 +1,14 @@
 'use client';
 
 import React from 'react';
-import { DollarSign, Percent, AlertCircle } from 'lucide-react';
+import { DollarSign, Percent, AlertCircle, Clock, Target } from 'lucide-react';
+
+export interface TrackedPricePoints {
+  baselinePrice?: string;
+  peakPrice?: string;
+  troughPrice?: string;
+  livePrice?: string;
+}
 
 interface TradeDataSectionProps {
   entryPrice: string;
@@ -17,6 +24,8 @@ interface TradeDataSectionProps {
   exitFeeFixed: string;
   onChangeExitFeeFixed: (val: string) => void;
   errorMessage?: string;
+  trackedPoints?: TrackedPricePoints;
+  onAddTestPriceWithVal?: (val: string) => void;
 }
 
 export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
@@ -33,9 +42,15 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
   exitFeeFixed,
   onChangeExitFeeFixed,
   errorMessage,
+  trackedPoints,
+  onAddTestPriceWithVal,
 }) => {
   const hasPercent = entryFeePercent.trim() !== '' || exitFeePercent.trim() !== '';
   const hasFixed = entryFeeFixed.trim() !== '' || exitFeeFixed.trim() !== '';
+
+  const hasAnyTrackedPoint = Boolean(
+    trackedPoints && (trackedPoints.baselinePrice || trackedPoints.peakPrice || trackedPoints.troughPrice || trackedPoints.livePrice)
+  );
 
   return (
     <section className="space-y-3.5">
@@ -63,6 +78,88 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
           ) : null}
         </div>
       </div>
+
+      {/* Tracked Points Quick Import Strip */}
+      {hasAnyTrackedPoint && trackedPoints && (
+        <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] animate-in fade-in">
+          <span className="text-amber-800 dark:text-amber-300 font-bold flex items-center gap-1">
+            <Clock className="w-3 h-3 text-amber-500" />
+            <span>سجل الرصد:</span>
+          </span>
+
+          {trackedPoints.baselinePrice && (
+            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-amber-500/30 rounded-lg px-2 py-0.5 font-mono shadow-xs">
+              <span className="text-amber-600 dark:text-amber-400 font-bold">الرصد: {trackedPoints.baselinePrice}</span>
+              <button
+                type="button"
+                onClick={() => onChangeEntryPrice(trackedPoints.baselinePrice!)}
+                className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-800 dark:text-amber-200 hover:bg-amber-500/30 cursor-pointer"
+                title="استخدام سعر الرصد كسعر دخول"
+              >
+                دخول
+              </button>
+              {onAddTestPriceWithVal && (
+                <button
+                  type="button"
+                  onClick={() => onAddTestPriceWithVal(trackedPoints.baselinePrice!)}
+                  className="text-[10px] px-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 cursor-pointer"
+                  title="إضافة سعر الرصد كهدف اختبار"
+                >
+                  اختبار
+                </button>
+              )}
+            </div>
+          )}
+
+          {trackedPoints.peakPrice && (
+            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-emerald-500/30 rounded-lg px-2 py-0.5 font-mono shadow-xs">
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold">القمة: {trackedPoints.peakPrice}</span>
+              <button
+                type="button"
+                onClick={() => onChangeEntryPrice(trackedPoints.peakPrice!)}
+                className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-800 dark:text-amber-200 hover:bg-amber-500/30 cursor-pointer"
+                title="استخدام القمة كسعر دخول"
+              >
+                دخول
+              </button>
+              {onAddTestPriceWithVal && (
+                <button
+                  type="button"
+                  onClick={() => onAddTestPriceWithVal(trackedPoints.peakPrice!)}
+                  className="text-[10px] px-1 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/30 cursor-pointer"
+                  title="إضافة القمة كهدف ربح في قائمة الاختبار"
+                >
+                  اختبار
+                </button>
+              )}
+            </div>
+          )}
+
+          {trackedPoints.troughPrice && (
+            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-rose-500/30 rounded-lg px-2 py-0.5 font-mono shadow-xs">
+              <span className="text-rose-600 dark:text-rose-400 font-bold">القاع: {trackedPoints.troughPrice}</span>
+              <button
+                type="button"
+                onClick={() => onChangeEntryPrice(trackedPoints.troughPrice!)}
+                className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-800 dark:text-amber-200 hover:bg-amber-500/30 cursor-pointer"
+                title="استخدام القاع كسعر دخول"
+              >
+                دخول
+              </button>
+              {onAddTestPriceWithVal && (
+                <button
+                  type="button"
+                  onClick={() => onAddTestPriceWithVal(trackedPoints.troughPrice!)}
+                  className="text-[10px] px-1 rounded bg-rose-500/20 text-rose-700 dark:text-rose-300 hover:bg-rose-500/30 cursor-pointer"
+                  title="إضافة القاع كهدف اختبار"
+                >
+                  اختبار
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Primary Inputs Grid: Entry Price & Trade Amount */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

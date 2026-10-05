@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Check, Trash2, SlidersHorizontal, Info } from 'lucide-react';
-import { FeeCalculationMethod } from '@/types/currency';
+import { X, Check, Trash2, SlidersHorizontal, Info, Palette, Sun, Moon, Laptop } from 'lucide-react';
+import { FeeCalculationMethod, ThemeMode, AccentColor } from '@/types/currency';
+import { useTheme } from '@/context/ThemeContext';
 
 export interface DefaultFeeSettings {
   entryFeePercent: string;
@@ -27,6 +28,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveDefaults,
   onClearDefaults,
 }) => {
+  const { themeMode, setThemeMode, accentColor, setAccentColor } = useTheme();
+
   const [form, setForm] = useState<DefaultFeeSettings>({ 
     ...currentSettings,
     feeMethod: currentSettings.feeMethod || 'cumulative'
@@ -56,6 +59,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
   };
 
+  const accentOptions: { key: AccentColor; name: string; bgClass: string; borderClass: string }[] = [
+    { key: 'amber', name: 'ذهبي Binance', bgClass: 'bg-amber-500', borderClass: 'border-amber-500' },
+    { key: 'emerald', name: 'أخضر زمردي', bgClass: 'bg-emerald-500', borderClass: 'border-emerald-500' },
+    { key: 'cyan', name: 'أزرق سيبراني', bgClass: 'bg-cyan-500', borderClass: 'border-cyan-500' },
+    { key: 'violet', name: 'بنفسجي عصري', bgClass: 'bg-violet-500', borderClass: 'border-violet-500' },
+  ];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
       <div 
@@ -66,7 +76,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="w-4 h-4 text-amber-500" />
             <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-              إعدادات الرسوم وحساب الفروقات
+              إعدادات التطبيق والمظهر
             </h2>
           </div>
           <button
@@ -77,11 +87,83 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        <div className="flex items-start gap-2 bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-          <Info className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-          <span>
-            تُحفظ تكاليف الدخول والخروج وطريقة الحساب لتطبيقها تلقائياً عند فتح حاسبة أي عملة لتوفير أعلى دقة ممكنة.
-          </span>
+        {/* القسم 1: المظهر والألوان (Theme & Accent) */}
+        <div className="space-y-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              <Palette className="w-3.5 h-3.5 text-amber-500" />
+              <span>مظهر التطبيق والوضع الليلي</span>
+            </span>
+          </div>
+
+          {/* Theme Mode: Light / Dark / System */}
+          <div className="grid grid-cols-3 gap-1.5">
+            <button
+              type="button"
+              onClick={() => setThemeMode('system')}
+              className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
+                themeMode === 'system'
+                  ? 'bg-amber-500/15 border-amber-500 text-amber-600 dark:text-amber-400 shadow-xs'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <Laptop className="w-3.5 h-3.5" />
+              <span>تلقائي</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setThemeMode('dark')}
+              className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
+                themeMode === 'dark'
+                  ? 'bg-amber-500/15 border-amber-500 text-amber-600 dark:text-amber-400 shadow-xs'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <Moon className="w-3.5 h-3.5" />
+              <span>داكن</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setThemeMode('light')}
+              className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border ${
+                themeMode === 'light'
+                  ? 'bg-amber-500/15 border-amber-500 text-amber-600 dark:text-amber-400 shadow-xs'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <Sun className="w-3.5 h-3.5" />
+              <span>فاتح</span>
+            </button>
+          </div>
+
+          {/* Accent Color Themes */}
+          <div className="space-y-1.5 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block">
+              لون الثيم المخصص:
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              {accentOptions.map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setAccentColor(opt.key)}
+                  className={`p-2 rounded-xl border text-right transition flex items-center justify-between cursor-pointer ${
+                    accentColor === opt.key
+                      ? 'bg-white dark:bg-slate-900 border-slate-400 dark:border-slate-600 shadow-xs ring-1 ring-amber-500/40'
+                      : 'bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`w-3.5 h-3.5 rounded-full ${opt.bgClass} shadow-xs`}></span>
+                    <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200">{opt.name}</span>
+                  </div>
+                  {accentColor === opt.key && <Check className="w-3.5 h-3.5 text-amber-500" />}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <form onSubmit={handleSave} className="space-y-3.5">
