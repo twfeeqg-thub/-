@@ -12,6 +12,7 @@ export interface TrackedCurrency {
   baselinePrice: string; // سعر الرصد المرجعي
   baselineTimestamp: number; // وقت تسجيل نقطة الرصد بالمللي ثانية
   createdAt: number;
+  coinQuantity?: string; // كمية العملة المرصودة (اختياري لاحتساب أرباح المحفظة)
   notes?: string;
   // أعلى سعر وأدنى سعر وصلته العملة منذ وقت الرصد
   peakPrice?: string;

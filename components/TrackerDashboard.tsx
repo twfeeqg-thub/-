@@ -28,7 +28,7 @@ interface TrackerDashboardProps {
   isLiveStreamActive: boolean;
   onToggleLiveStream: (active: boolean) => void;
   onSelectCurrency: (id: string) => void;
-  onAddCurrency: (name: string, baselinePrice: string) => void;
+  onAddCurrency: (name: string, baselinePrice: string, coinQuantity?: string) => void;
   onDeleteCurrency: (id: string) => void;
   onReorderCurrencies: (newCurrencies: TrackedCurrency[]) => void;
   onOpenSettings: () => void;
@@ -52,6 +52,7 @@ export const TrackerDashboard: React.FC<TrackerDashboardProps> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newCurrencyName, setNewCurrencyName] = useState('');
   const [newBaselinePrice, setNewBaselinePrice] = useState('');
+  const [newCoinQuantity, setNewCoinQuantity] = useState('');
   const [currencyToDelete, setCurrencyToDelete] = useState<TrackedCurrency | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [isFetchingPrice, setIsFetchingPrice] = useState(false);
@@ -84,6 +85,7 @@ export const TrackerDashboard: React.FC<TrackerDashboardProps> = ({
     setErrorMsg('');
     setNewCurrencyName('');
     setNewBaselinePrice('');
+    setNewCoinQuantity('');
     setIsAddModalOpen(true);
   };
 
@@ -132,10 +134,11 @@ export const TrackerDashboard: React.FC<TrackerDashboardProps> = ({
       setErrorMsg('يرجى إدخال سعر رصد مرجعي صالح أكبر من صفر');
       return;
     }
-    onAddCurrency(trimmed, priceTrimmed);
+    onAddCurrency(trimmed, priceTrimmed, newCoinQuantity.trim() || undefined);
     setIsAddModalOpen(false);
     setNewCurrencyName('');
     setNewBaselinePrice('');
+    setNewCoinQuantity('');
     setErrorMsg('');
   };
 
@@ -412,6 +415,8 @@ export const TrackerDashboard: React.FC<TrackerDashboardProps> = ({
 
             const peakNum = tc.peakPrice ? parseFloat(tc.peakPrice) : baseNum;
             const peakPercent = baseNum > 0 ? ((peakNum - baseNum) / baseNum) * 100 : 0;
+            const qtyNum = tc.coinQuantity ? parseFloat(tc.coinQuantity) : null;
+            const pnlUsdt = qtyNum !== null && !isNaN(qtyNum) && qtyNum > 0 ? netChange * qtyNum : null;
 
             return (
               <div
@@ -445,6 +450,11 @@ export const TrackerDashboard: React.FC<TrackerDashboardProps> = ({
                       <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 group-hover:text-amber-500 transition-colors truncate">
                         {tc.name}
                       </h3>
+                      {tc.coinQuantity && (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-bold shrink-0 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20" title={`كمية العملة المرصودة: ${tc.coinQuantity}`}>
+                          {tc.coinQuantity} {tc.name}
+                        </span>
+                      )}
                       <span className="text-[10px] text-slate-400 font-medium shrink-0 flex items-center gap-1">
                         <Clock className="w-2.5 h-2.5 text-amber-500/80" />
                         <span>{getElapsedString(tc.baselineTimestamp)}</span>
@@ -507,6 +517,7 @@ export const TrackerDashboard: React.FC<TrackerDashboardProps> = ({
                       dir="ltr"
                     >
                       {isGain ? '+' : ''}{formatPercent(percentChange)}
+                      {pnlUsdt !== null ? ` (${isGain ? '+' : ''}${formatCompactPrice(pnlUsdt)}$)` : ''}
                     </span>
                   </div>
 
@@ -681,6 +692,25 @@ export const TrackerDashboard: React.FC<TrackerDashboardProps> = ({
                 />
                 <span className="text-[10px] text-slate-400 block mt-1">
                   هذا هو السعر الذي سيُحتسب الصعود أو الهبوط مقارنة به ابتداءً من هذه اللحظة.
+                </span>
+              </div>
+
+              {/* Optional Coin Quantity */}
+              <div>
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                  كمية العملة <span className="text-amber-500 text-[10px] font-bold">(اختياري - لحساب أرباح المحفظة بالدولار)</span>:
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="مثال: 10 أو 0.5 أو 100"
+                  value={newCoinQuantity}
+                  onChange={(e) => setNewCoinQuantity(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:border-amber-500 font-mono text-left"
+                  dir="ltr"
+                />
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  إذا أدخلت كمية العملة، سيحسب النظام صافي أرباح وخسائر محفظتك بالدولار تلقائياً.
                 </span>
               </div>
 

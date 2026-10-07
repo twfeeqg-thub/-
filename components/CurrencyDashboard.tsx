@@ -22,7 +22,7 @@ import { PWAInstallButton } from './PWAInstallButton';
 interface CurrencyDashboardProps {
   currencies: CurrencyItem[];
   onSelectCurrency: (id: string) => void;
-  onAddCurrency: (name: string) => void;
+  onAddCurrency: (name: string, coinQuantity?: string) => void;
   onDeleteCurrency: (id: string) => void;
   onReorderCurrencies: (newCurrencies: CurrencyItem[]) => void;
   onOpenSettings: () => void;
@@ -44,6 +44,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
 }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newCurrencyName, setNewCurrencyName] = useState('');
+  const [newCoinQuantity, setNewCoinQuantity] = useState('');
   const [currencyToDelete, setCurrencyToDelete] = useState<CurrencyItem | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -73,6 +74,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
     }
     setErrorMsg('');
     setNewCurrencyName('');
+    setNewCoinQuantity('');
     setIsAddModalOpen(true);
   };
 
@@ -83,9 +85,10 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
       setErrorMsg('يرجى إدخال اسم العملة');
       return;
     }
-    onAddCurrency(trimmed);
+    onAddCurrency(trimmed, newCoinQuantity.trim() || undefined);
     setIsAddModalOpen(false);
     setNewCurrencyName('');
+    setNewCoinQuantity('');
     setErrorMsg('');
   };
 
@@ -408,6 +411,7 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
                       </h3>
                       <span className="text-[11px] text-slate-400 font-mono shrink-0" dir="ltr">
                         {currency.tradeAmount ? `${currency.tradeAmount} USDT` : ''}
+                        {currency.coinQuantity ? ` (${currency.coinQuantity} ${currency.name})` : ''}
                       </span>
                     </div>
                   </div>
@@ -614,6 +618,25 @@ export const CurrencyDashboard: React.FC<CurrencyDashboardProps> = ({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Optional Coin Quantity */}
+              <div>
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                  كمية العملة <span className="text-amber-500 text-[10px] font-bold">(اختياري - للتحويل المباشر)</span>:
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="مثال: 50 أو 1.5"
+                  value={newCoinQuantity}
+                  onChange={(e) => setNewCoinQuantity(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:border-amber-500 font-mono text-left"
+                  dir="ltr"
+                />
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  إذا كنت تعرف كمية العملة فقط الناتجة عن التحويل، يمكنك إدخالها هنا.
+                </span>
               </div>
 
               {errorMsg && (

@@ -17,7 +17,9 @@ import {
   Zap,
   Target,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  Coins,
+  Edit3
 } from 'lucide-react';
 import { useCurrentTimestamp } from '@/lib/time';
 
@@ -28,11 +30,12 @@ interface TrackerDetailViewProps {
   onToggleLiveStream: (active: boolean) => void;
   onBack: () => void;
   onUpdateBaseline: (newPrice: string) => void;
+  onUpdateQuantity?: (newQuantity: string) => void;
   onAddSnapshot: (price: string, label?: string) => void;
   onDeleteSnapshot: (snapshotId: string) => void;
-  onSendToCalculatorAsEntry: (currencyName: string, price: string) => void;
-  onSendToCalculatorAsTest: (currencyName: string, price: string) => void;
-  onOpenCalculatorForCurrency: (currencyName: string) => void;
+  onSendToCalculatorAsEntry: (currencyName: string, price: string, coinQuantity?: string) => void;
+  onSendToCalculatorAsTest: (currencyName: string, price: string, coinQuantity?: string) => void;
+  onOpenCalculatorForCurrency: (currencyName: string, coinQuantity?: string) => void;
 }
 
 export const TrackerDetailView: React.FC<TrackerDetailViewProps> = ({
@@ -42,6 +45,7 @@ export const TrackerDetailView: React.FC<TrackerDetailViewProps> = ({
   onToggleLiveStream,
   onBack,
   onUpdateBaseline,
+  onUpdateQuantity,
   onAddSnapshot,
   onDeleteSnapshot,
   onSendToCalculatorAsEntry,
@@ -50,6 +54,8 @@ export const TrackerDetailView: React.FC<TrackerDetailViewProps> = ({
 }) => {
   const [snapshotLabel, setSnapshotLabel] = useState('');
   const [copySuccessMsg, setCopySuccessMsg] = useState<string | null>(null);
+  const [isEditingQty, setIsEditingQty] = useState(false);
+  const [quantityInput, setQuantityInput] = useState('');
   const currentTime = useCurrentTimestamp();
 
   // Numbers
@@ -64,6 +70,23 @@ export const TrackerDetailView: React.FC<TrackerDetailViewProps> = ({
 
   const troughNum = currency.troughPrice ? parseFloat(currency.troughPrice) : baseNum;
   const troughPercent = baseNum > 0 ? ((troughNum - baseNum) / baseNum) * 100 : 0;
+
+  // Wallet quantity calculations
+  const qtyNum = currency.coinQuantity ? parseFloat(currency.coinQuantity) : null;
+  const hasValidQty = qtyNum !== null && !isNaN(qtyNum) && qtyNum > 0;
+  const initialTotalCost = hasValidQty ? baseNum * qtyNum : 0;
+  const currentTotalValue = hasValidQty ? liveNum * qtyNum : 0;
+  const totalPnlUsdt = hasValidQty ? netChange * qtyNum : 0;
+  const peakPnlUsdt = hasValidQty ? (peakNum - baseNum) * qtyNum : 0;
+
+  const handleSaveQuantity = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (onUpdateQuantity) {
+      onUpdateQuantity(quantityInput.trim());
+      setIsEditingQty(false);
+      showToast('تم تحديث كمية العملة بنجاح');
+    }
+  };
 
   // Exact Elapsed Time string
   const getExactElapsed = () => {
@@ -158,7 +181,7 @@ export const TrackerDetailView: React.FC<TrackerDetailViewProps> = ({
           </button>
 
           <button
-            onClick={() => onOpenCalculatorForCurrency(currency.name)}
+            onClick={() => onOpenCalculatorForCurrency(currency.name, currency.coinQuantity)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer shadow-sm shadow-amber-500/20 active:scale-95"
             title="فتح حاسبة الصفقات والتعادل لهذه العملة"
           >
@@ -271,6 +294,127 @@ export const TrackerDetailView: React.FC<TrackerDetailViewProps> = ({
         </div>
       </div>
 
+      {/* Metric 4: Coin Quantity & Wallet Value (Optional) */}
+      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Coins className="w-4 h-4 text-amber-500" />
+            <h2 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              كمية العملة وأرباح المحفظة بالدولار (اختياري)
+            </h2>
+            {currency.coinQuantity && (
+              <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                {currency.coinQuantity} {currency.name}
+              </span>
+            )}
+          </div>
+
+          {/* Quick Edit/Set Quantity Form */}
+          {isEditingQty ? (
+            <form onSubmit={handleSaveQuantity} className="flex items-center gap-2">
+              <input
+                type="text"
+                inputMode="decimal"
+                autoFocus
+                placeholder="أدخل الكمية (مثال: 50)"
+                value={quantityInput}
+                onChange={(e) => setQuantityInput(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:border-amber-500 font-mono text-left w-36"
+                dir="ltr"
+              />
+              <button
+                type="submit"
+                className="px-2.5 py-1 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition cursor-pointer"
+              >
+                حفظ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuantityInput(currency.coinQuantity || '');
+                  setIsEditingQty(false);
+                }}
+                className="px-2 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs hover:bg-slate-200 transition cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setQuantityInput(currency.coinQuantity || '');
+                setIsEditingQty(true);
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-amber-500/15 hover:text-amber-600 dark:hover:text-amber-400 text-slate-600 dark:text-slate-300 text-xs font-semibold transition cursor-pointer"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>{currency.coinQuantity ? 'تعديل الكمية' : 'إدخال كمية العملة'}</span>
+            </button>
+          )}
+        </div>
+
+        {hasValidQty ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5">
+                قيمة الشراء عند الرصد:
+              </span>
+              <span className="text-xs sm:text-sm font-mono font-bold text-slate-900 dark:text-slate-100" dir="ltr">
+                {formatCurrencyPrice(initialTotalCost)} USDT
+              </span>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5">
+                القيمة السوقية الآن:
+              </span>
+              <span className="text-xs sm:text-sm font-mono font-bold text-slate-900 dark:text-slate-100" dir="ltr">
+                {formatCurrencyPrice(currentTotalValue)} USDT
+              </span>
+            </div>
+
+            <div className={`p-2.5 rounded-xl border ${
+              isGain 
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300' 
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+            }`}>
+              <span className="text-[10px] opacity-80 block mb-0.5">
+                صافي الربح / الخسارة بالدولار:
+              </span>
+              <span className="text-xs sm:text-sm font-mono font-bold" dir="ltr">
+                {isGain ? '+' : ''}{formatCurrencyPrice(totalPnlUsdt)} USDT ({isGain ? '+' : ''}{formatPercent(percentChange)})
+              </span>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300">
+              <span className="text-[10px] opacity-80 block mb-0.5">
+                أقصى ربح عند القمة:
+              </span>
+              <span className="text-xs sm:text-sm font-mono font-bold" dir="ltr">
+                +{formatCurrencyPrice(peakPnlUsdt)} USDT (+{formatPercent(peakPercent)})
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/30 border border-dashed border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <span>
+              لم يتم إدخال كمية العملة بعد. أدخل كمية العملة التي تمتلكها لحساب صافي الربح والخسارة لمحفظتك بالـ USDT تلقائياً.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setQuantityInput(currency.coinQuantity || '');
+                setIsEditingQty(true);
+              }}
+              className="text-amber-600 dark:text-amber-400 font-bold hover:underline shrink-0 pr-2 cursor-pointer"
+            >
+              + إضافة الكمية
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Control Actions & Calculator Exporter */}
       <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
         <div className="flex items-center justify-between">
@@ -288,7 +432,7 @@ export const TrackerDetailView: React.FC<TrackerDetailViewProps> = ({
           <button
             type="button"
             onClick={() => {
-              onSendToCalculatorAsEntry(currency.name, currency.baselinePrice);
+              onSendToCalculatorAsEntry(currency.name, currency.baselinePrice, currency.coinQuantity);
               showToast(`تم تعيين سعر الرصد (${currency.baselinePrice}) كسعر دخول في الحاسبة`);
             }}
             className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/50 hover:border-amber-500 hover:bg-amber-500/10 text-right transition cursor-pointer flex flex-col gap-1"
@@ -308,7 +452,7 @@ export const TrackerDetailView: React.FC<TrackerDetailViewProps> = ({
           <button
             type="button"
             onClick={() => {
-              onSendToCalculatorAsTest(currency.name, String(peakNum));
+              onSendToCalculatorAsTest(currency.name, String(peakNum), currency.coinQuantity);
               showToast(`تمت إضافة القمة (${peakNum}) كسعر اختبار في الحاسبة`);
             }}
             className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/50 hover:border-emerald-500 hover:bg-emerald-500/10 text-right transition cursor-pointer flex flex-col gap-1"
@@ -328,7 +472,7 @@ export const TrackerDetailView: React.FC<TrackerDetailViewProps> = ({
           <button
             type="button"
             onClick={() => {
-              onSendToCalculatorAsTest(currency.name, String(liveNum));
+              onSendToCalculatorAsTest(currency.name, String(liveNum), currency.coinQuantity);
               showToast(`تمت إضافة السعر اللحظي (${liveNum}) كسعر اختبار في الحاسبة`);
             }}
             className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/50 hover:border-sky-500 hover:bg-sky-500/10 text-right transition cursor-pointer flex flex-col gap-1"

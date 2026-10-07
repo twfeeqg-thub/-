@@ -8,6 +8,7 @@
 export interface TrackInputs {
   entryPrice: string; // E: سعر الدخول
   tradeAmount: string; // A: مبلغ الصفقة بالـ USDT
+  coinQuantity?: string; // كمية العملة (اختياري للتحويل المباشر)
   // مسار النسبة
   entryFeePercent?: string; // B: نسبة تكلفة الدخول (%)
   exitFeePercent?: string; // S: نسبة تكلفة الخروج (%)
@@ -167,9 +168,13 @@ export function formatPercent(val: number): string {
 }
 
 /**
- * التحقق من المدخلات الأساسية (سعر الدخول ومبلغ الصفقة)
+ * التحقق من المدخلات الأساسية (سعر الدخول ومبلغ الصفقة، مع دعم كمية العملة كبديل ذكي)
  */
-export function validateBaseInputs(entryPriceStr: string, tradeAmountStr: string): {
+export function validateBaseInputs(
+  entryPriceStr: string,
+  tradeAmountStr: string,
+  coinQuantityStr?: string
+): {
   isValid: boolean;
   errorMessage?: string;
   entryPrice: number;
@@ -177,6 +182,26 @@ export function validateBaseInputs(entryPriceStr: string, tradeAmountStr: string
 } {
   const trimmedEntry = entryPriceStr.trim();
   const trimmedAmount = tradeAmountStr.trim();
+  const trimmedQty = coinQuantityStr ? coinQuantityStr.trim() : '';
+
+  // الدعم الذكي لكمية العملة (في حال التحويل المباشر من عملة لأخرى):
+  // 1. إذا كان سعر الدخول وكمية العملة مدخلين ولكن مبلغ الصفقة بالـ USDT فارغ:
+  if (trimmedEntry && !trimmedAmount && trimmedQty) {
+    const entryPrice = parseFloat(trimmedEntry);
+    const qty = parseFloat(trimmedQty);
+    if (!isNaN(entryPrice) && entryPrice > 0 && !isNaN(qty) && qty > 0) {
+      return { isValid: true, entryPrice, tradeAmount: entryPrice * qty };
+    }
+  }
+
+  // 2. إذا كان مبلغ الصفقة بالـ USDT وكمية العملة مدخلين ولكن سعر الدخول فارغ:
+  if (!trimmedEntry && trimmedAmount && trimmedQty) {
+    const tradeAmount = parseFloat(trimmedAmount);
+    const qty = parseFloat(trimmedQty);
+    if (!isNaN(tradeAmount) && tradeAmount > 0 && !isNaN(qty) && qty > 0) {
+      return { isValid: true, entryPrice: tradeAmount / qty, tradeAmount };
+    }
+  }
 
   if (!trimmedEntry) {
     return { isValid: false, errorMessage: 'يرجى إدخال سعر الدخول', entryPrice: 0, tradeAmount: 0 };
@@ -188,7 +213,7 @@ export function validateBaseInputs(entryPriceStr: string, tradeAmountStr: string
   }
 
   if (!trimmedAmount) {
-    return { isValid: false, errorMessage: 'يرجى إدخال مبلغ الصفقة', entryPrice, tradeAmount: 0 };
+    return { isValid: false, errorMessage: 'يرجى إدخال مبلغ الصفقة بالـ USDT أو كمية العملة', entryPrice, tradeAmount: 0 };
   }
 
   const tradeAmount = parseFloat(trimmedAmount);
@@ -477,7 +502,7 @@ export function calculateAll(
   inputs: TrackInputs,
   testPrices: string[]
 ): FullCalculationResult {
-  const baseValidation = validateBaseInputs(inputs.entryPrice, inputs.tradeAmount);
+  const baseValidation = validateBaseInputs(inputs.entryPrice, inputs.tradeAmount, inputs.coinQuantity);
 
   if (!baseValidation.isValid) {
     return {

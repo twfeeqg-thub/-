@@ -4,7 +4,8 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { 
   calculateAll, 
   TrackInputs, 
-  FullCalculationResult 
+  FullCalculationResult,
+  trimTrailingZeros
 } from '@/lib/calculator';
 import { 
   CurrencyItem, 
@@ -136,7 +137,7 @@ export default function CalculatorPage() {
   }, [persistTrackedCurrencies]);
 
   // Add currency (max 25)
-  const handleAddCurrency = (name: string) => {
+  const handleAddCurrency = (name: string, coinQuantity?: string) => {
     if (currencies.length >= MAX_CURRENCIES) return;
 
     const newCurrency: CurrencyItem = {
@@ -145,6 +146,7 @@ export default function CalculatorPage() {
       createdAt: Date.now(),
       entryPrice: '',
       tradeAmount: '',
+      coinQuantity: coinQuantity || '',
       entryFeePercent: defaultFees.entryFeePercent || '',
       exitFeePercent: defaultFees.exitFeePercent || '',
       entryFeeFixed: defaultFees.entryFeeFixed || '',
@@ -207,6 +209,7 @@ export default function CalculatorPage() {
     updateActiveCurrency({
       entryPrice: '',
       tradeAmount: '',
+      coinQuantity: '',
       entryFeePercent: defaultFees.entryFeePercent || '',
       exitFeePercent: defaultFees.exitFeePercent || '',
       entryFeeFixed: defaultFees.entryFeeFixed || '',
@@ -275,6 +278,7 @@ export default function CalculatorPage() {
     const inputs: TrackInputs = {
       entryPrice: activeCurrency.entryPrice,
       tradeAmount: activeCurrency.tradeAmount,
+      coinQuantity: activeCurrency.coinQuantity,
       entryFeePercent: activeCurrency.entryFeePercent,
       exitFeePercent: activeCurrency.exitFeePercent,
       entryFeeFixed: activeCurrency.entryFeeFixed,
@@ -334,7 +338,7 @@ export default function CalculatorPage() {
     }
   };
 
-  const handleAddTrackedCurrency = (name: string, baselinePrice: string) => {
+  const handleAddTrackedCurrency = (name: string, baselinePrice: string, coinQuantity?: string) => {
     const cleanSym = name.trim().toUpperCase();
     const pair = cleanSym.endsWith('USDT') ? cleanSym : `${cleanSym}USDT`;
     const newTC: TrackedCurrency = {
@@ -344,6 +348,7 @@ export default function CalculatorPage() {
       baselinePrice,
       baselineTimestamp: Date.now(),
       createdAt: Date.now(),
+      coinQuantity: coinQuantity || undefined,
       peakPrice: baselinePrice,
       peakTimestamp: Date.now(),
       troughPrice: baselinePrice,
@@ -355,6 +360,23 @@ export default function CalculatorPage() {
     setTrackedCurrencies(next);
     persistTrackedCurrencies(next);
     setActiveTrackedId(newTC.id);
+  };
+
+  const handleUpdateTrackedQuantity = (newQuantity: string) => {
+    if (!activeTrackedId) return;
+    setTrackedCurrencies((prev) => {
+      const next = prev.map((tc) => {
+        if (tc.id === activeTrackedId) {
+          return {
+            ...tc,
+            coinQuantity: newQuantity.trim() || undefined,
+          };
+        }
+        return tc;
+      });
+      persistTrackedCurrencies(next);
+      return next;
+    });
   };
 
   const handleDeleteTrackedCurrency = (id: string) => {
@@ -429,16 +451,23 @@ export default function CalculatorPage() {
   };
 
   // Direct Integration: Send price from Tracker to Calculator as Entry Price
-  const handleSendToCalculatorAsEntry = (currencyName: string, price: string) => {
+  const handleSendToCalculatorAsEntry = (currencyName: string, price: string, coinQuantity?: string) => {
     const upper = currencyName.trim().toUpperCase();
     let target = currencies.find((c) => c.name === upper);
+    const pNum = parseFloat(price);
+    const qNum = coinQuantity ? parseFloat(coinQuantity) : NaN;
+    const calcTradeAmt = !isNaN(pNum) && pNum > 0 && !isNaN(qNum) && qNum > 0
+      ? trimTrailingZeros((pNum * qNum).toFixed(6))
+      : '100';
+
     if (!target) {
       target = {
         id: `curr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         name: upper,
         createdAt: Date.now(),
         entryPrice: price,
-        tradeAmount: '100',
+        tradeAmount: calcTradeAmt,
+        coinQuantity: coinQuantity || '',
         entryFeePercent: defaultFees.entryFeePercent || '',
         exitFeePercent: defaultFees.exitFeePercent || '',
         entryFeeFixed: defaultFees.entryFeeFixed || '',
@@ -450,7 +479,17 @@ export default function CalculatorPage() {
       setCurrencies(next);
       persistCurrencies(next);
     } else {
-      const next = currencies.map((c) => (c.id === target!.id ? { ...c, entryPrice: price } : c));
+      const next = currencies.map((c) => {
+        if (c.id === target!.id) {
+          const qty = coinQuantity || c.coinQuantity;
+          const q = qty ? parseFloat(qty) : NaN;
+          const amt = !isNaN(pNum) && pNum > 0 && !isNaN(q) && q > 0
+            ? trimTrailingZeros((pNum * q).toFixed(6))
+            : c.tradeAmount || '100';
+          return { ...c, entryPrice: price, coinQuantity: qty, tradeAmount: amt };
+        }
+        return c;
+      });
       setCurrencies(next);
       persistCurrencies(next);
     }
@@ -459,7 +498,7 @@ export default function CalculatorPage() {
   };
 
   // Direct Integration: Send price from Tracker to Calculator as Test Target
-  const handleSendToCalculatorAsTest = (currencyName: string, price: string) => {
+  const handleSendToCalculatorAsTest = (currencyName: string, price: string, coinQuantity?: string) => {
     const upper = currencyName.trim().toUpperCase();
     let target = currencies.find((c) => c.name === upper);
     if (!target) {
@@ -467,8 +506,9 @@ export default function CalculatorPage() {
         id: `curr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         name: upper,
         createdAt: Date.now(),
-        entryPrice: price,
+        entryPrice: '',
         tradeAmount: '100',
+        coinQuantity: coinQuantity || '',
         entryFeePercent: defaultFees.entryFeePercent || '',
         exitFeePercent: defaultFees.exitFeePercent || '',
         entryFeeFixed: defaultFees.entryFeeFixed || '',
@@ -482,7 +522,11 @@ export default function CalculatorPage() {
     } else {
       const existing = target.testPrices.filter((p) => p.trim() !== '');
       const newTests = existing.includes(price) ? existing : [...existing, price].slice(0, MAX_TEST_PRICES);
-      const next = currencies.map((c) => (c.id === target!.id ? { ...c, testPrices: newTests } : c));
+      const next = currencies.map((c) => (c.id === target!.id ? { 
+        ...c, 
+        testPrices: newTests,
+        coinQuantity: coinQuantity || c.coinQuantity 
+      } : c));
       setCurrencies(next);
       persistCurrencies(next);
     }
@@ -490,7 +534,7 @@ export default function CalculatorPage() {
     setActiveMainTab('calculator');
   };
 
-  const handleOpenCalculatorForCurrency = (currencyName: string) => {
+  const handleOpenCalculatorForCurrency = (currencyName: string, coinQuantity?: string) => {
     const upper = currencyName.trim().toUpperCase();
     let target = currencies.find((c) => c.name === upper);
     if (!target) {
@@ -500,6 +544,7 @@ export default function CalculatorPage() {
         createdAt: Date.now(),
         entryPrice: '',
         tradeAmount: '100',
+        coinQuantity: coinQuantity || '',
         entryFeePercent: defaultFees.entryFeePercent || '',
         exitFeePercent: defaultFees.exitFeePercent || '',
         entryFeeFixed: defaultFees.entryFeeFixed || '',
@@ -508,6 +553,10 @@ export default function CalculatorPage() {
         testPrices: [''],
       };
       const next = [target, ...currencies];
+      setCurrencies(next);
+      persistCurrencies(next);
+    } else if (coinQuantity && !target.coinQuantity) {
+      const next = currencies.map((c) => (c.id === target!.id ? { ...c, coinQuantity } : c));
       setCurrencies(next);
       persistCurrencies(next);
     }
@@ -747,9 +796,33 @@ export default function CalculatorPage() {
               {/* Section 1: Trade Data (بيانات الصفقة مع شريط نقاط سجل الرصد) */}
               <TradeDataSection
                 entryPrice={activeCurrency.entryPrice}
-                onChangeEntryPrice={(val) => updateActiveCurrency({ entryPrice: val })}
+                onChangeEntryPrice={(val) => {
+                  if (activeCurrency.coinQuantity && (!activeCurrency.tradeAmount || activeCurrency.tradeAmount.trim() === '')) {
+                    const q = parseFloat(activeCurrency.coinQuantity);
+                    const p = parseFloat(val);
+                    if (!isNaN(q) && q > 0 && !isNaN(p) && p > 0) {
+                      updateActiveCurrency({ entryPrice: val, tradeAmount: trimTrailingZeros((q * p).toFixed(6)) });
+                      return;
+                    }
+                  }
+                  updateActiveCurrency({ entryPrice: val });
+                }}
                 tradeAmount={activeCurrency.tradeAmount}
                 onChangeTradeAmount={(val) => updateActiveCurrency({ tradeAmount: val })}
+                coinQuantity={activeCurrency.coinQuantity || ''}
+                onChangeCoinQuantity={(val) => {
+                  const updates: Partial<CurrencyItem> = { coinQuantity: val };
+                  const q = parseFloat(val);
+                  const p = parseFloat(activeCurrency.entryPrice);
+                  const a = parseFloat(activeCurrency.tradeAmount);
+                  if (!isNaN(q) && q > 0 && !isNaN(p) && p > 0) {
+                    updates.tradeAmount = trimTrailingZeros((q * p).toFixed(6));
+                  } else if (!isNaN(q) && q > 0 && !isNaN(a) && a > 0 && (!activeCurrency.entryPrice || activeCurrency.entryPrice.trim() === '')) {
+                    updates.entryPrice = trimTrailingZeros((a / q).toFixed(8));
+                  }
+                  updateActiveCurrency(updates);
+                }}
+                currencyName={activeCurrency.name}
                 entryFeePercent={activeCurrency.entryFeePercent}
                 onChangeEntryFeePercent={(val) => updateActiveCurrency({ entryFeePercent: val })}
                 exitFeePercent={activeCurrency.exitFeePercent}
@@ -759,7 +832,7 @@ export default function CalculatorPage() {
                 exitFeeFixed={activeCurrency.exitFeeFixed}
                 onChangeExitFeeFixed={(val) => updateActiveCurrency({ exitFeeFixed: val })}
                 errorMessage={
-                  !calculationResult.hasValidBaseInputs && (activeCurrency.entryPrice || activeCurrency.tradeAmount)
+                  !calculationResult.hasValidBaseInputs && (activeCurrency.entryPrice || activeCurrency.tradeAmount || activeCurrency.coinQuantity)
                     ? calculationResult.baseErrorMessage
                     : undefined
                 }
@@ -825,6 +898,7 @@ export default function CalculatorPage() {
               onToggleLiveStream={handleToggleTrackerStream}
               onBack={() => setActiveTrackedId(null)}
               onUpdateBaseline={handleUpdateBaseline}
+              onUpdateQuantity={handleUpdateTrackedQuantity}
               onAddSnapshot={handleAddSnapshot}
               onDeleteSnapshot={handleDeleteSnapshot}
               onSendToCalculatorAsEntry={handleSendToCalculatorAsEntry}

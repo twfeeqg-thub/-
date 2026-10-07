@@ -8,6 +8,7 @@ export interface CurrencyItem {
   createdAt: number;
   entryPrice: string;
   tradeAmount: string;
+  coinQuantity?: string; // كمية العملة (اختياري للتحويل المباشر)
   entryFeePercent: string;
   exitFeePercent: string;
   entryFeeFixed: string;

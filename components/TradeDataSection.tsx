@@ -15,6 +15,9 @@ interface TradeDataSectionProps {
   onChangeEntryPrice: (val: string) => void;
   tradeAmount: string;
   onChangeTradeAmount: (val: string) => void;
+  coinQuantity?: string;
+  onChangeCoinQuantity?: (val: string) => void;
+  currencyName?: string;
   entryFeePercent: string;
   onChangeEntryFeePercent: (val: string) => void;
   exitFeePercent: string;
@@ -33,6 +36,9 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
   onChangeEntryPrice,
   tradeAmount,
   onChangeTradeAmount,
+  coinQuantity,
+  onChangeCoinQuantity,
+  currencyName,
   entryFeePercent,
   onChangeEntryFeePercent,
   exitFeePercent,
@@ -161,8 +167,8 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
         </div>
       )}
 
-      {/* Primary Inputs Grid: Entry Price & Trade Amount */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      {/* Primary Inputs Grid: Entry Price & Trade Amount & Coin Quantity */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
         {/* Entry Price */}
         <div className="space-y-1">
           <label className="text-[11px] font-medium text-slate-700 dark:text-slate-300 block text-right">
@@ -204,7 +210,34 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
             </span>
           </div>
           <span className="text-[9px] text-slate-400 dark:text-slate-500 block text-right">
-            تُشتق كمية العملة تلقائياً دون إدخالها
+            المبلغ الإجمالي بالدولار المستثمر في الصفقة
+          </span>
+        </div>
+
+        {/* Coin Quantity (Optional / Alternative for Convert & Swaps) */}
+        <div className="space-y-1 sm:col-span-2 lg:col-span-1">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-medium text-slate-700 dark:text-slate-300 block text-right">
+              كمية العملة <span className="text-amber-500 text-[10px] font-bold">(اختياري)</span>
+            </label>
+            <span className="text-[9px] text-slate-400">للتحويل المباشر</span>
+          </div>
+          <div className="relative flex items-center">
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="مثال: 50 أو 1.5"
+              value={coinQuantity || ''}
+              onChange={(e) => onChangeCoinQuantity && onChangeCoinQuantity(e.target.value)}
+              className="w-full bg-slate-50 dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700/80 rounded-xl pl-16 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition text-left font-mono"
+              dir="ltr"
+            />
+            <span className="absolute left-2.5 text-[11px] font-bold text-slate-400 select-none max-w-[55px] truncate" title={currencyName}>
+              {currencyName || 'QTY'}
+            </span>
+          </div>
+          <span className="text-[9px] text-slate-400 dark:text-slate-500 block text-right">
+            عند إدخال الكمية يُحسب مبلغ الـ USDT تلقائياً
           </span>
         </div>
       </div>
