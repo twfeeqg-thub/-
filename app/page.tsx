@@ -42,12 +42,20 @@ import { TrackerDetailView } from '@/components/TrackerDetailView';
 import { ScalperDashboard } from '@/components/ScalperDashboard';
 import { ThemeCustomizerModal } from '@/components/ThemeCustomizerModal';
 import { BreakEvenComparisonDrawer } from '@/components/BreakEvenComparisonDrawer';
+import { WatchlistDashboard } from '@/components/WatchlistDashboard';
+import { 
+  WatchlistItem, 
+  WatchlistCategory, 
+  WatchlistFlagColor, 
+  STORAGE_KEY_WATCHLIST, 
+  DEFAULT_WATCHLIST_ITEMS 
+} from '@/types/watchlist';
 import { systemNotification } from '@/lib/systemNotification';
-import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio } from 'lucide-react';
+import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList } from 'lucide-react';
 
 export default function CalculatorPage() {
-  // Navigation Tabs: 'calculator' | 'tracker' | 'scalper'
-  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'tracker' | 'scalper'>('scalper');
+  // Navigation Tabs: 'calculator' | 'tracker' | 'scalper' | 'watchlist'
+  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'tracker' | 'scalper' | 'watchlist'>('watchlist');
 
   // Window State for Calculator
   const [windowMode, setWindowMode] = useState<WindowMode>('normal');
@@ -88,6 +96,9 @@ export default function CalculatorPage() {
     totalRealizedVolumeUsdt: 0,
     avgDurationMinutes: 0,
   });
+
+  // Watchlist Feature State (Screen #4 TradingView style)
+  const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
 
   // Load saved default fees, currencies, tracked currencies, and scalper trades
   useEffect(() => {
@@ -221,6 +232,21 @@ export default function CalculatorPage() {
           setScalperSession(JSON.parse(savedSession));
         }
 
+        // Load Watchlist Items (Screen #4 TradingView style)
+        const savedWatchlist = localStorage.getItem(STORAGE_KEY_WATCHLIST);
+        if (savedWatchlist) {
+          const parsed: WatchlistItem[] = JSON.parse(savedWatchlist);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setWatchlistItems(parsed);
+          } else {
+            setWatchlistItems(DEFAULT_WATCHLIST_ITEMS);
+            localStorage.setItem(STORAGE_KEY_WATCHLIST, JSON.stringify(DEFAULT_WATCHLIST_ITEMS));
+          }
+        } else {
+          setWatchlistItems(DEFAULT_WATCHLIST_ITEMS);
+          localStorage.setItem(STORAGE_KEY_WATCHLIST, JSON.stringify(DEFAULT_WATCHLIST_ITEMS));
+        }
+
         const savedStreamState = localStorage.getItem(STORAGE_KEY_TRACKER_STREAM);
         if (savedStreamState !== null) {
           setIsTrackerStreamActive(savedStreamState === 'true');
@@ -264,6 +290,15 @@ export default function CalculatorPage() {
   const persistScalperSession = useCallback((stats: ScalperSessionStats) => {
     try {
       localStorage.setItem(STORAGE_KEY_SCALPER_SESSION, JSON.stringify(stats));
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  // Helper to persist watchlist items
+  const persistWatchlistItems = useCallback((items: WatchlistItem[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY_WATCHLIST, JSON.stringify(items));
     } catch {
       // Ignore
     }
@@ -737,15 +772,21 @@ export default function CalculatorPage() {
     persistScalperSessionRef.current = persistScalperSession;
   }, [persistScalperSession]);
 
-  // Combined symbols key for WebSocket (Tracker + Scalper)
+  const persistWatchlistItemsRef = useRef(persistWatchlistItems);
+  useEffect(() => {
+    persistWatchlistItemsRef.current = persistWatchlistItems;
+  }, [persistWatchlistItems]);
+
+  // Combined symbols key for WebSocket (Tracker + Scalper + Watchlist)
   const trackedSymbolsKey = useMemo(() => {
     if (!isTrackerStreamActive) return '';
     const tr = trackedCurrencies.map((tc) => tc.binanceSymbol.toLowerCase());
     const sc = scalpTrades.map((st) => st.binanceSymbol.toLowerCase());
-    const combined = Array.from(new Set([...tr, ...sc]));
+    const wl = watchlistItems.map((wi) => wi.symbol.toLowerCase());
+    const combined = Array.from(new Set([...tr, ...sc, ...wl]));
     if (combined.length === 0) return '';
     return combined.sort().join('/');
-  }, [isTrackerStreamActive, trackedCurrencies, scalpTrades]);
+  }, [isTrackerStreamActive, trackedCurrencies, scalpTrades, watchlistItems]);
 
   // Real-time WebSocket connection to Binance for both Tracker and Scalper
   useEffect(() => {
@@ -906,6 +947,47 @@ export default function CalculatorPage() {
 
                 if (hasChanges) {
                   persistScalpTradesRef.current(next);
+                  return next;
+                }
+                return prev;
+              });
+
+              // 3. Update Watchlist and Trigger Instant Price Alerts (إشعار Push ونغمة صوتية)
+              setWatchlistItems((prev) => {
+                let hasAlertFired = false;
+                const next = prev.map((item) => {
+                  if (item.symbol === symbol && item.hasAlert && item.alertPrice) {
+                    const targetNum = parseFloat(item.alertPrice);
+                    if (!isNaN(targetNum) && targetNum > 0) {
+                      const isTriggered = 
+                        (item.alertDirection === 'above' && priceNum >= targetNum) ||
+                        (item.alertDirection === 'below' && priceNum <= targetNum) ||
+                        (!item.alertDirection && Math.abs(priceNum - targetNum) / targetNum < 0.002);
+
+                      if (isTriggered) {
+                        hasAlertFired = true;
+                        systemNotification.sendNotification({
+                          title: `🎯 تنبيه سعري فوري (${item.name})!`,
+                          body: `وصل سعر ${item.name} إلى ${priceNum} USDT (المستهدف: ${targetNum} USDT).`,
+                          tag: `wl-alert-${item.id}`,
+                          icon: '/pwa-192x192.png',
+                          badge: '/icon.svg',
+                          renotify: true,
+                          requireInteraction: true,
+                        });
+
+                        return {
+                          ...item,
+                          hasAlert: false, // Deactivate once fired
+                        };
+                      }
+                    }
+                  }
+                  return item;
+                });
+
+                if (hasAlertFired) {
+                  persistWatchlistItemsRef.current(next);
                   return next;
                 }
                 return prev;
@@ -1096,6 +1178,80 @@ export default function CalculatorPage() {
     }
     setActiveMainTab('tracker');
   };
+
+  // ----------------------------------------------------
+  // WATCHLIST ACTIONS & HANDLERS (Screen #4 TradingView)
+  // ----------------------------------------------------
+
+  const handleAddWatchlistItem = (symbol: string, category: WatchlistCategory, flagColor: WatchlistFlagColor) => {
+    const clean = symbol.trim().toUpperCase();
+    const pair = clean.endsWith('USDT') ? clean : `${clean}USDT`;
+    const baseName = pair.replace('USDT', '');
+    const existing = watchlistItems.find((i) => i.symbol === pair);
+    if (existing) return;
+
+    const newItem: WatchlistItem = {
+      id: `wl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      symbol: pair,
+      name: baseName,
+      category,
+      flagColor,
+      description: `${baseName} / Tether US`,
+    };
+
+    const next = [newItem, ...watchlistItems];
+    setWatchlistItems(next);
+    persistWatchlistItems(next);
+  };
+
+  const handleUpdateWatchlistItem = (item: WatchlistItem) => {
+    const next = watchlistItems.map((i) => (i.id === item.id ? item : i));
+    setWatchlistItems(next);
+    persistWatchlistItems(next);
+  };
+
+  const handleDeleteWatchlistItem = (itemId: string) => {
+    const next = watchlistItems.filter((i) => i.id !== itemId);
+    setWatchlistItems(next);
+    persistWatchlistItems(next);
+  };
+
+  const handleSetWatchlistAlert = (symbol: string, targetPrice: string, direction: 'above' | 'below') => {
+    const next = watchlistItems.map((item) => {
+      if (item.symbol === symbol) {
+        return {
+          ...item,
+          hasAlert: true,
+          alertPrice: targetPrice,
+          alertDirection: direction,
+        };
+      }
+      return item;
+    });
+    setWatchlistItems(next);
+    persistWatchlistItems(next);
+
+    // Request system push notification permission
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      systemNotification.requestPermission();
+    }
+  };
+
+  const handleNavigateToScalperFromWatchlist = (symbolName: string) => {
+    const clean = symbolName.trim().toUpperCase();
+    const pair = clean.endsWith('USDT') ? clean : `${clean}USDT`;
+    const baseName = pair.replace('USDT', '');
+    const exists = scalpTrades.find((t) => t.binanceSymbol === pair);
+    if (!exists) {
+      handleAddScalpTrade(baseName);
+    }
+    setActiveMainTab('scalper');
+  };
+
+  const handleReorderWatchlistItems = useCallback((newItems: WatchlistItem[]) => {
+    setWatchlistItems(newItems);
+    persistWatchlistItems(newItems);
+  }, [persistWatchlistItems]);
 
   return (
     <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 pb-28 sm:pb-32 overflow-x-hidden transition-colors">
@@ -1383,6 +1539,27 @@ export default function CalculatorPage() {
             onOpenThemeCustomizer={() => setIsThemeCustomizerOpen(true)}
           />
         )}
+
+        {/* ========================================================= */}
+        {/* TAB 4: WATCHLIST TAB (شاشة مراقبة العملات TradingView)     */}
+        {/* ========================================================= */}
+        {activeMainTab === 'watchlist' && (
+          <WatchlistDashboard
+            watchlistItems={watchlistItems}
+            livePrices={trackerLivePrices}
+            isLiveStreamActive={isTrackerStreamActive}
+            currencies={currencies}
+            scalpTrades={scalpTrades}
+            onToggleLiveStream={handleToggleTrackerStream}
+            onUpdateWatchlistItem={handleUpdateWatchlistItem}
+            onAddWatchlistItem={handleAddWatchlistItem}
+            onDeleteWatchlistItem={handleDeleteWatchlistItem}
+            onReorderWatchlistItems={handleReorderWatchlistItems}
+            onNavigateToCalculator={(coinName) => handleOpenCalculatorForCurrency(coinName)}
+            onNavigateToScalper={handleNavigateToScalperFromWatchlist}
+            onSetPriceAlert={handleSetWatchlistAlert}
+          />
+        )}
       </div>
 
       {/* Settings Modal */}
@@ -1413,27 +1590,27 @@ export default function CalculatorPage() {
         }}
       />
 
-      {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة للعناصر الثلاثة) */}
+      {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة للعناصر الأربعة بتباين فائق) */}
       <nav 
-        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200/90 dark:border-slate-800/90 py-2 px-3 sm:px-6 shadow-[0_-4px_25px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_25px_rgba(0,0,0,0.5)]"
+        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-300 dark:border-slate-800 py-2 px-2 sm:px-6 shadow-[0_-4px_25px_rgba(0,0,0,0.12)] dark:shadow-[0_-4px_25px_rgba(0,0,0,0.6)]"
         dir="rtl"
         aria-label="القائمة الرئيسية الثابتة"
       >
-        <div className="max-w-2xl mx-auto grid grid-cols-3 gap-2">
+        <div className="max-w-3xl mx-auto grid grid-cols-4 gap-1.5 sm:gap-2">
           {/* Item 1: حاسبة التجارة والتعادل */}
           <button
             type="button"
             onClick={() => setActiveMainTab('calculator')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-2 sm:px-4 rounded-2xl transition-all cursor-pointer ${
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-3 rounded-2xl transition-all cursor-pointer ${
               activeMainTab === 'calculator'
-                ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 font-semibold'
+                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
+                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
             }`}
           >
-            <Calculator className={`w-5 h-5 ${activeMainTab === 'calculator' ? 'stroke-[2.5]' : ''}`} />
-            <span className="text-[11px] sm:text-xs tracking-tight">حاسبة التجارة والتعادل</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-              activeMainTab === 'calculator' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+            <Calculator className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'calculator' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
+            <span className="text-[10px] sm:text-xs tracking-tight">حاسبة التعادل</span>
+            <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
+              activeMainTab === 'calculator' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
             }`}>
               {currencies.length}
             </span>
@@ -1443,21 +1620,21 @@ export default function CalculatorPage() {
           <button
             type="button"
             onClick={() => setActiveMainTab('scalper')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-2 sm:px-4 rounded-2xl transition-all cursor-pointer relative ${
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-3 rounded-2xl transition-all cursor-pointer relative ${
               activeMainTab === 'scalper'
-                ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 font-semibold'
+                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
+                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
             }`}
           >
-            <Zap className={`w-5 h-5 ${activeMainTab === 'scalper' ? 'fill-current' : ''}`} />
-            <span className="text-[11px] sm:text-xs tracking-tight">لوحة السكالبينج السريعة</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-              activeMainTab === 'scalper' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+            <Zap className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'scalper' ? 'fill-current' : 'stroke-[2]'}`} />
+            <span className="text-[10px] sm:text-xs tracking-tight">السكالبينج</span>
+            <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
+              activeMainTab === 'scalper' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
             }`}>
               {scalpTrades.length}
             </span>
             {scalpTrades.some((t) => t.status === 'in_trade') && (
-              <span className="absolute top-1.5 left-2 w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              <span className="absolute top-1.5 left-1.5 w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
             )}
           </button>
 
@@ -1465,18 +1642,37 @@ export default function CalculatorPage() {
           <button
             type="button"
             onClick={() => setActiveMainTab('tracker')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-2 sm:px-4 rounded-2xl transition-all cursor-pointer ${
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-3 rounded-2xl transition-all cursor-pointer ${
               activeMainTab === 'tracker'
-                ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 font-semibold'
+                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
+                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
             }`}
           >
-            <TrendingUp className={`w-5 h-5 ${activeMainTab === 'tracker' ? 'stroke-[2.5]' : ''}`} />
-            <span className="text-[11px] sm:text-xs tracking-tight">ترجمات عاجلة (رصد)</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-              activeMainTab === 'tracker' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+            <TrendingUp className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'tracker' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
+            <span className="text-[10px] sm:text-xs tracking-tight">رصد الصعود</span>
+            <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
+              activeMainTab === 'tracker' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
             }`}>
               {trackedCurrencies.length}
+            </span>
+          </button>
+
+          {/* Item 4: قائمة المراقبة (TradingView Watchlist) */}
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('watchlist')}
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-3 rounded-2xl transition-all cursor-pointer ${
+              activeMainTab === 'watchlist'
+                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
+                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+            }`}
+          >
+            <LayoutList className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'watchlist' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
+            <span className="text-[10px] sm:text-xs tracking-tight">قائمة المراقبة</span>
+            <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
+              activeMainTab === 'watchlist' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
+            }`}>
+              {watchlistItems.length}
             </span>
           </button>
         </div>
