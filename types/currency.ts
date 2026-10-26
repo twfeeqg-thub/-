@@ -14,6 +14,7 @@ export interface CurrencyItem {
   entryFeeFixed: string;
   exitFeeFixed: string;
   testPrices: string[];
+  testPriceTimestamps?: number[]; // الطوابع الزمنية لتسجيل أسعار الاختبار
   // Live monitoring optional fields
   isMonitoringActive?: boolean;
   binanceSymbol?: string;

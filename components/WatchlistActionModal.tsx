@@ -22,6 +22,7 @@ interface WatchlistActionModalProps {
   item: WatchlistItem | null;
   livePrice?: string;
   onClose: () => void;
+  onOpenChart?: (item: WatchlistItem) => void;
   onOpenInCalculator: (item: WatchlistItem) => void;
   onOpenInScalper: (item: WatchlistItem) => void;
   onSetAlert: (item: WatchlistItem, targetPrice: string, direction: 'above' | 'below') => void;
@@ -50,6 +51,7 @@ export const WatchlistActionModal: React.FC<WatchlistActionModalProps> = ({
   item,
   livePrice,
   onClose,
+  onOpenChart,
   onOpenInCalculator,
   onOpenInScalper,
   onSetAlert,
@@ -285,7 +287,14 @@ export const WatchlistActionModal: React.FC<WatchlistActionModalProps> = ({
           {/* Action 1: فتح شارت العملة */}
           <button
             type="button"
-            onClick={() => setShowChartNotice((prev) => !prev)}
+            onClick={() => {
+              if (onOpenChart) {
+                onOpenChart(item);
+                onClose();
+              } else {
+                setShowChartNotice((prev) => !prev);
+              }
+            }}
             className="w-full p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 border border-slate-300 dark:border-slate-700 flex items-center justify-between text-right transition cursor-pointer group"
           >
             <div className="flex items-center gap-2.5">

@@ -30,6 +30,7 @@ interface WatchlistDashboardProps {
   onAddWatchlistItem: (symbol: string, category: WatchlistCategory, flagColor: WatchlistFlagColor) => void;
   onDeleteWatchlistItem: (itemId: string) => void;
   onReorderWatchlistItems: (items: WatchlistItem[]) => void;
+  onOpenChart: (item: WatchlistItem) => void;
   onNavigateToCalculator: (currencyName: string) => void;
   onNavigateToScalper: (symbolName: string) => void;
   onSetPriceAlert: (symbol: string, targetPrice: string, direction: 'above' | 'below') => void;
@@ -46,6 +47,7 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
   onAddWatchlistItem,
   onDeleteWatchlistItem,
   onReorderWatchlistItems,
+  onOpenChart,
   onNavigateToCalculator,
   onNavigateToScalper,
   onSetPriceAlert,
@@ -508,6 +510,7 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
         item={selectedItem}
         livePrice={selectedItem ? livePrices[selectedItem.symbol] : undefined}
         onClose={() => setSelectedItem(null)}
+        onOpenChart={onOpenChart}
         onOpenInCalculator={(item) => onNavigateToCalculator(item.name)}
         onOpenInScalper={(item) => onNavigateToScalper(item.name)}
         onSetAlert={(item, price, dir) => {

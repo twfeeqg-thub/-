@@ -43,6 +43,7 @@ import { ScalperDashboard } from '@/components/ScalperDashboard';
 import { ThemeCustomizerModal } from '@/components/ThemeCustomizerModal';
 import { BreakEvenComparisonDrawer } from '@/components/BreakEvenComparisonDrawer';
 import { WatchlistDashboard } from '@/components/WatchlistDashboard';
+import { TradingViewChartModal } from '@/components/TradingViewChartModal';
 import { 
   WatchlistItem, 
   WatchlistCategory, 
@@ -99,6 +100,19 @@ export default function CalculatorPage() {
 
   // Watchlist Feature State (Screen #4 TradingView style)
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
+
+  // Active TradingView Chart Modal State
+  const [activeChartItem, setActiveChartItem] = useState<{
+    symbol: string;
+    currencyName: string;
+    description?: string;
+    entryPrice?: string;
+    breakEvenPrice?: string;
+    coinQuantity?: string;
+    tradeAmount?: string;
+    testPrices?: string[];
+    testPriceTimestamps?: number[];
+  } | null>(null);
 
   // Load saved default fees, currencies, tracked currencies, and scalper trades
   useEffect(() => {
@@ -399,11 +413,13 @@ export default function CalculatorPage() {
     });
   };
 
-  // Test prices handlers for active currency (max 10)
+  // Test prices handlers for active currency (max 10) with Timestamp tracking
   const handleAddTestPrice = () => {
     if (!activeCurrency || activeCurrency.testPrices.length >= MAX_TEST_PRICES) return;
+    const now = Date.now();
     updateActiveCurrency({
       testPrices: [...activeCurrency.testPrices, ''],
+      testPriceTimestamps: [...(activeCurrency.testPriceTimestamps || []), now],
     });
   };
 
@@ -411,25 +427,30 @@ export default function CalculatorPage() {
     if (!activeCurrency) return;
     const current = activeCurrency.testPrices.filter((p) => p.trim() !== '');
     if (current.includes(val) || current.length >= MAX_TEST_PRICES) return;
+    const now = Date.now();
     updateActiveCurrency({
       testPrices: [...current, val],
+      testPriceTimestamps: [...(activeCurrency.testPriceTimestamps || []), now],
     });
   };
 
   const handleRemoveTestPrice = (index: number) => {
     if (!activeCurrency || activeCurrency.testPrices.length <= 1) {
-      updateActiveCurrency({ testPrices: [''] });
+      updateActiveCurrency({ testPrices: [''], testPriceTimestamps: [Date.now()] });
       return;
     }
     const updated = activeCurrency.testPrices.filter((_, i) => i !== index);
-    updateActiveCurrency({ testPrices: updated });
+    const updatedTs = (activeCurrency.testPriceTimestamps || []).filter((_, i) => i !== index);
+    updateActiveCurrency({ testPrices: updated, testPriceTimestamps: updatedTs });
   };
 
   const handleChangeTestPrice = (index: number, val: string) => {
     if (!activeCurrency) return;
     const updated = [...activeCurrency.testPrices];
     updated[index] = val;
-    updateActiveCurrency({ testPrices: updated });
+    const updatedTs = [...(activeCurrency.testPriceTimestamps || [])];
+    updatedTs[index] = Date.now();
+    updateActiveCurrency({ testPrices: updated, testPriceTimestamps: updatedTs });
   };
 
   // Apply live Binance price into active currency inputs
@@ -442,7 +463,11 @@ export default function CalculatorPage() {
     if (!activeCurrency) return;
     const current = activeCurrency.testPrices.filter((p) => p.trim() !== '');
     if (current.length >= MAX_TEST_PRICES) return;
-    updateActiveCurrency({ testPrices: [...current, price] });
+    const now = Date.now();
+    updateActiveCurrency({ 
+      testPrices: [...current, price],
+      testPriceTimestamps: [...(activeCurrency.testPriceTimestamps || []), now],
+    });
   };
 
   // Full calculation results for active currency
@@ -1253,6 +1278,49 @@ export default function CalculatorPage() {
     persistWatchlistItems(newItems);
   }, [persistWatchlistItems]);
 
+  const handleOpenChartForCurrency = useCallback((item: {
+    symbol: string;
+    name?: string;
+    description?: string;
+    entryPrice?: string;
+    breakEvenPrice?: string;
+    coinQuantity?: string;
+    tradeAmount?: string;
+  }) => {
+    const upper = (item.name || item.symbol.replace('USDT', '')).trim().toUpperCase();
+    const matchedCalc = currencies.find((c) => c.name === upper);
+    const matchedScalp = scalpTrades.find((s) => s.name === upper);
+
+    const entry = item.entryPrice || matchedCalc?.entryPrice || matchedScalp?.entryPrice || '';
+    let be = item.breakEvenPrice || '';
+    const qty = item.coinQuantity || matchedCalc?.coinQuantity || matchedScalp?.coinQuantity || '';
+    const amt = item.tradeAmount || matchedCalc?.tradeAmount || matchedScalp?.allocatedUsdt || '';
+
+    if (!be && entry) {
+      const pNum = parseFloat(entry);
+      if (!isNaN(pNum) && pNum > 0) {
+        const buyFee = parseFloat(matchedCalc?.entryFeePercent || defaultFees.entryFeePercent || '0.1') || 0.1;
+        const sellFee = parseFloat(matchedCalc?.exitFeePercent || defaultFees.exitFeePercent || '0.1') || 0.1;
+        be = ((pNum * (1 + buyFee / 100)) / (1 - sellFee / 100)).toFixed(6);
+      }
+    }
+
+    const tPrices = matchedCalc?.testPrices || [];
+    const tTimestamps = matchedCalc?.testPriceTimestamps || [];
+
+    setActiveChartItem({
+      symbol: item.symbol,
+      currencyName: upper,
+      description: item.description,
+      entryPrice: entry,
+      breakEvenPrice: be,
+      coinQuantity: qty,
+      tradeAmount: amt,
+      testPrices: tPrices,
+      testPriceTimestamps: tTimestamps,
+    });
+  }, [currencies, scalpTrades, defaultFees]);
+
   return (
     <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 pb-28 sm:pb-32 overflow-x-hidden transition-colors">
       {/* Background Ambience and Guide */}
@@ -1555,6 +1623,7 @@ export default function CalculatorPage() {
             onAddWatchlistItem={handleAddWatchlistItem}
             onDeleteWatchlistItem={handleDeleteWatchlistItem}
             onReorderWatchlistItems={handleReorderWatchlistItems}
+            onOpenChart={(item) => handleOpenChartForCurrency(item)}
             onNavigateToCalculator={(coinName) => handleOpenCalculatorForCurrency(coinName)}
             onNavigateToScalper={handleNavigateToScalperFromWatchlist}
             onSetPriceAlert={handleSetWatchlistAlert}
@@ -1589,6 +1658,26 @@ export default function CalculatorPage() {
           setIsComparisonOpen(false);
         }}
       />
+
+      {/* Full-Screen TradingView Advanced Real-Time Chart Modal */}
+      {activeChartItem && (
+        <TradingViewChartModal
+          isOpen={Boolean(activeChartItem)}
+          symbol={activeChartItem.symbol}
+          currencyName={activeChartItem.currencyName}
+          description={activeChartItem.description}
+          entryPrice={activeChartItem.entryPrice}
+          breakEvenPrice={activeChartItem.breakEvenPrice}
+          coinQuantity={activeChartItem.coinQuantity}
+          tradeAmount={activeChartItem.tradeAmount}
+          livePrice={trackerLivePrices[activeChartItem.symbol] || undefined}
+          testPrices={activeChartItem.testPrices}
+          testPriceTimestamps={activeChartItem.testPriceTimestamps}
+          onClose={() => setActiveChartItem(null)}
+          onNavigateToCalculator={(name) => handleOpenCalculatorForCurrency(name)}
+          onNavigateToScalper={(name) => handleNavigateToScalperFromWatchlist(name)}
+        />
+      )}
 
       {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة للعناصر الأربعة بتباين فائق) */}
       <nav 

@@ -42,6 +42,23 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ar" dir="rtl" className="dark" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if (typeof window !== 'undefined') {
+                window.addEventListener('error', function(event) {
+                  if (event.message === 'Script error.' || (event.filename && event.filename.indexOf('tradingview') !== -1)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return true;
+                  }
+                }, true);
+              }
+            `,
+          }}
+        />
+      </head>
       <body className="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased min-h-screen selection:bg-amber-500/30 selection:text-amber-600 dark:selection:text-amber-200 transition-colors duration-150">
         <ThemeProvider>
           <ServiceWorkerRegister />
