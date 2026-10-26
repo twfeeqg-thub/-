@@ -79,9 +79,9 @@ export const WatchlistActionModal: React.FC<WatchlistActionModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md">
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 pb-20 sm:pb-4 bg-slate-950/85 backdrop-blur-md">
       <div 
-        className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 my-0 sm:my-auto max-h-[92vh] overflow-y-auto"
+        className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 pb-8 sm:pb-6 my-0 sm:my-auto max-h-[82vh] overflow-y-auto"
         dir="rtl"
       >
         {/* Top Handle / Close */}
@@ -383,6 +383,28 @@ export const WatchlistActionModal: React.FC<WatchlistActionModalProps> = ({
               </div>
             </div>
             <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-purple-500 transition" />
+          </button>
+
+          {/* Action 5: حذف العملة من قائمة المراقبة */}
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="w-full p-2.5 rounded-2xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 flex items-center justify-between text-right transition cursor-pointer group"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center justify-center font-bold">
+                <Trash2 className="w-4 h-4 group-hover:scale-110 transition" />
+              </div>
+              <div>
+                <span className="font-black text-sm text-rose-700 dark:text-rose-400 block leading-tight">
+                  ٥. حذف العملة من قائمة المراقبة
+                </span>
+                <span className="text-[11px] font-semibold text-rose-600/80 dark:text-rose-400/80">
+                  إزالة {item.symbol} نهائياً من قائمة مراقبة العملات
+                </span>
+              </div>
+            </div>
+            <Trash2 className="w-4 h-4 text-rose-400 group-hover:text-rose-600 transition" />
           </button>
         </div>
 
