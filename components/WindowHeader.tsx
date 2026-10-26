@@ -11,7 +11,9 @@ import {
   SlidersHorizontal,
   BookmarkCheck,
   ArrowRight,
-  Coins
+  Coins,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 import { ThemeToggle } from './ThemeToggle';
@@ -26,6 +28,8 @@ interface WindowHeaderProps {
   hasDefaultsSaved?: boolean;
   currencyName?: string;
   onBackToDashboard?: () => void;
+  isReadOnly?: boolean;
+  onToggleReadOnly?: () => void;
 }
 
 export const WindowHeader: React.FC<WindowHeaderProps> = ({
@@ -36,6 +40,8 @@ export const WindowHeader: React.FC<WindowHeaderProps> = ({
   hasDefaultsSaved = false,
   currencyName,
   onBackToDashboard,
+  isReadOnly = false,
+  onToggleReadOnly,
 }) => {
   return (
     <header className="flex items-center justify-between px-3.5 py-2.5 bg-white/95 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-800/80 backdrop-blur-md select-none rounded-t-2xl">
@@ -102,11 +108,32 @@ export const WindowHeader: React.FC<WindowHeaderProps> = ({
           </button>
         )}
 
+        {/* Read-Only Mode Toggle (وضع القراءة فقط لمنع التعديل غير المقصود) */}
+        {onToggleReadOnly && (
+          <button
+            type="button"
+            onClick={onToggleReadOnly}
+            className={`p-1.5 rounded-lg border transition cursor-pointer flex items-center gap-1 ${
+              isReadOnly
+                ? 'bg-amber-500 text-slate-950 font-bold border-amber-500 shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700/60 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+            title={isReadOnly ? 'وضع القراءة فقط مفعّل (انقر لإلغاء القفل والتعديل)' : 'تفعيل وضع القراءة فقط لحماية الحقول من التعديل أثناء المراقبة'}
+          >
+            {isReadOnly ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+          </button>
+        )}
+
         {/* Reset inputs button */}
         <button
           onClick={onReset}
-          className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-rose-500 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-          title="تفريغ خانات هذه العملة"
+          disabled={isReadOnly}
+          className={`p-1.5 rounded-lg border transition cursor-pointer ${
+            isReadOnly
+              ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700'
+              : 'bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700/60 hover:text-rose-500 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+          }`}
+          title={isReadOnly ? 'معطل في وضع القراءة فقط' : 'تفريغ خانات هذه العملة'}
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>

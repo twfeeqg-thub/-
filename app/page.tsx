@@ -20,6 +20,12 @@ import {
   STORAGE_KEY_TRACKER, 
   STORAGE_KEY_TRACKER_STREAM 
 } from '@/types/tracker';
+import { 
+  ScalpTrade, 
+  ScalperSessionStats, 
+  STORAGE_KEY_SCALPER_TRADES, 
+  STORAGE_KEY_SCALPER_SESSION 
+} from '@/types/scalper';
 import { CurrencyDashboard } from '@/components/CurrencyDashboard';
 import { FloatingContainer } from '@/components/FloatingContainer';
 import { TradeDataSection } from '@/components/TradeDataSection';
@@ -33,17 +39,22 @@ import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { WindowMode } from '@/components/WindowHeader';
 import { TrackerDashboard } from '@/components/TrackerDashboard';
 import { TrackerDetailView } from '@/components/TrackerDetailView';
+import { ScalperDashboard } from '@/components/ScalperDashboard';
 import { ThemeCustomizerModal } from '@/components/ThemeCustomizerModal';
-import { Calculator, TrendingUp, Palette } from 'lucide-react';
+import { BreakEvenComparisonDrawer } from '@/components/BreakEvenComparisonDrawer';
+import { systemNotification } from '@/lib/systemNotification';
+import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio } from 'lucide-react';
 
 export default function CalculatorPage() {
-  // Navigation Tabs: 'calculator' | 'tracker'
-  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'tracker'>('calculator');
+  // Navigation Tabs: 'calculator' | 'tracker' | 'scalper'
+  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'tracker' | 'scalper'>('scalper');
 
   // Window State for Calculator
   const [windowMode, setWindowMode] = useState<WindowMode>('normal');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isThemeCustomizerOpen, setIsThemeCustomizerOpen] = useState(false);
+  const [isComparisonOpen, setIsComparisonOpen] = useState(false);
+  const [isCalculatorReadOnly, setIsCalculatorReadOnly] = useState(false);
 
   // Default fee settings from localStorage
   const [defaultFees, setDefaultFees] = useState<DefaultFeeSettings>({
@@ -66,7 +77,19 @@ export default function CalculatorPage() {
   const [trackerLivePrices, setTrackerLivePrices] = useState<Record<string, string>>({});
   const trackerWsRef = useRef<WebSocket | null>(null);
 
-  // Load saved default fees, currencies, and tracked currencies
+  // Scalper Feature State
+  const [scalpTrades, setScalpTrades] = useState<ScalpTrade[]>([]);
+  const [scalperSession, setScalperSession] = useState<ScalperSessionStats>({
+    availableCapitalUsdt: '1000',
+    initialCapitalUsdt: '1000',
+    completedScalps: 0,
+    winningScalps: 0,
+    totalRealizedPnlUsdt: 0,
+    totalRealizedVolumeUsdt: 0,
+    avgDurationMinutes: 0,
+  });
+
+  // Load saved default fees, currencies, tracked currencies, and scalper trades
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
@@ -94,6 +117,110 @@ export default function CalculatorPage() {
           }
         }
 
+        // Load scalper trades
+        const savedScalper = localStorage.getItem(STORAGE_KEY_SCALPER_TRADES);
+        if (savedScalper) {
+          const parsed: ScalpTrade[] = JSON.parse(savedScalper);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setScalpTrades(parsed);
+          } else {
+            // Seed initial volatile coins for bottom hunting
+            const initialSeeds: ScalpTrade[] = [
+              {
+                id: 'scalp_init_sol',
+                name: 'SOL',
+                binanceSymbol: 'SOLUSDT',
+                status: 'watching',
+                bounceTriggerPercent: 0.4,
+                trailingDropAlertPercent: 0.35,
+                target1Percent: 0.6,
+                target2Percent: 1.2,
+                target3Percent: 2.0,
+                createdAt: Date.now(),
+                notes: 'عملة سيولة عالية ممتازة للسكالبينج السريع',
+              },
+              {
+                id: 'scalp_init_doge',
+                name: 'DOGE',
+                binanceSymbol: 'DOGEUSDT',
+                status: 'watching',
+                bounceTriggerPercent: 0.5,
+                trailingDropAlertPercent: 0.4,
+                target1Percent: 0.6,
+                target2Percent: 1.2,
+                target3Percent: 2.0,
+                createdAt: Date.now() - 1000,
+                notes: 'تذبذب سريع ملائم للارتداد من القيعان',
+              },
+              {
+                id: 'scalp_init_pepe',
+                name: 'PEPE',
+                binanceSymbol: 'PEPEUSDT',
+                status: 'watching',
+                bounceTriggerPercent: 0.6,
+                trailingDropAlertPercent: 0.5,
+                target1Percent: 0.7,
+                target2Percent: 1.5,
+                target3Percent: 2.5,
+                createdAt: Date.now() - 2000,
+                notes: 'ارتدادات قوية خلال دقائق معدودة',
+              },
+            ];
+            setScalpTrades(initialSeeds);
+            localStorage.setItem(STORAGE_KEY_SCALPER_TRADES, JSON.stringify(initialSeeds));
+          }
+        } else {
+          const initialSeeds: ScalpTrade[] = [
+            {
+              id: 'scalp_init_sol',
+              name: 'SOL',
+              binanceSymbol: 'SOLUSDT',
+              status: 'watching',
+              bounceTriggerPercent: 0.4,
+              trailingDropAlertPercent: 0.35,
+              target1Percent: 0.6,
+              target2Percent: 1.2,
+              target3Percent: 2.0,
+              createdAt: Date.now(),
+              notes: 'عملة سيولة عالية ممتازة للسكالبينج السريع',
+            },
+            {
+              id: 'scalp_init_doge',
+              name: 'DOGE',
+              binanceSymbol: 'DOGEUSDT',
+              status: 'watching',
+              bounceTriggerPercent: 0.5,
+              trailingDropAlertPercent: 0.4,
+              target1Percent: 0.6,
+              target2Percent: 1.2,
+              target3Percent: 2.0,
+              createdAt: Date.now() - 1000,
+              notes: 'تذبذب سريع ملائم للارتداد من القيعان',
+            },
+            {
+              id: 'scalp_init_pepe',
+              name: 'PEPE',
+              binanceSymbol: 'PEPEUSDT',
+              status: 'watching',
+              bounceTriggerPercent: 0.6,
+              trailingDropAlertPercent: 0.5,
+              target1Percent: 0.7,
+              target2Percent: 1.5,
+              target3Percent: 2.5,
+              createdAt: Date.now() - 2000,
+              notes: 'ارتدادات قوية خلال دقائق معدودة',
+            },
+          ];
+          setScalpTrades(initialSeeds);
+          localStorage.setItem(STORAGE_KEY_SCALPER_TRADES, JSON.stringify(initialSeeds));
+        }
+
+        // Load scalper session stats
+        const savedSession = localStorage.getItem(STORAGE_KEY_SCALPER_SESSION);
+        if (savedSession) {
+          setScalperSession(JSON.parse(savedSession));
+        }
+
         const savedStreamState = localStorage.getItem(STORAGE_KEY_TRACKER_STREAM);
         if (savedStreamState !== null) {
           setIsTrackerStreamActive(savedStreamState === 'true');
@@ -119,6 +246,24 @@ export default function CalculatorPage() {
   const persistTrackedCurrencies = useCallback((items: TrackedCurrency[]) => {
     try {
       localStorage.setItem(STORAGE_KEY_TRACKER, JSON.stringify(items));
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  // Helper to persist scalper trades
+  const persistScalpTrades = useCallback((items: ScalpTrade[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SCALPER_TRADES, JSON.stringify(items));
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  // Helper to persist scalper session
+  const persistScalperSession = useCallback((stats: ScalperSessionStats) => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SCALPER_SESSION, JSON.stringify(stats));
     } catch {
       // Ignore
     }
@@ -582,14 +727,27 @@ export default function CalculatorPage() {
     persistTrackedCurrenciesRef.current = persistTrackedCurrencies;
   }, [persistTrackedCurrencies]);
 
-  const trackedSymbolsKey = useMemo(() => {
-    if (!isTrackerStreamActive || trackedCurrencies.length === 0) return '';
-    return Array.from(new Set(trackedCurrencies.map((tc) => tc.binanceSymbol.toLowerCase())))
-      .sort()
-      .join('/');
-  }, [isTrackerStreamActive, trackedCurrencies]);
+  const persistScalpTradesRef = useRef(persistScalpTrades);
+  useEffect(() => {
+    persistScalpTradesRef.current = persistScalpTrades;
+  }, [persistScalpTrades]);
 
-  // Real-time WebSocket connection to Binance for all tracked currencies
+  const persistScalperSessionRef = useRef(persistScalperSession);
+  useEffect(() => {
+    persistScalperSessionRef.current = persistScalperSession;
+  }, [persistScalperSession]);
+
+  // Combined symbols key for WebSocket (Tracker + Scalper)
+  const trackedSymbolsKey = useMemo(() => {
+    if (!isTrackerStreamActive) return '';
+    const tr = trackedCurrencies.map((tc) => tc.binanceSymbol.toLowerCase());
+    const sc = scalpTrades.map((st) => st.binanceSymbol.toLowerCase());
+    const combined = Array.from(new Set([...tr, ...sc]));
+    if (combined.length === 0) return '';
+    return combined.sort().join('/');
+  }, [isTrackerStreamActive, trackedCurrencies, scalpTrades]);
+
+  // Real-time WebSocket connection to Binance for both Tracker and Scalper
   useEffect(() => {
     if (!isTrackerStreamActive || !trackedSymbolsKey) {
       if (trackerWsRef.current) {
@@ -618,9 +776,9 @@ export default function CalculatorPage() {
           if (symbol && price) {
             setTrackerLivePrices((prev) => ({ ...prev, [symbol]: price }));
 
-            // Update Peak and Trough if necessary
             const priceNum = parseFloat(price);
             if (!isNaN(priceNum) && priceNum > 0) {
+              // 1. Update Tracker Currencies Peak & Trough
               setTrackedCurrencies((prev) => {
                 let hasChanges = false;
                 const next = prev.map((tc) => {
@@ -662,6 +820,96 @@ export default function CalculatorPage() {
                 }
                 return prev;
               });
+
+              // 2. Update Scalper Trades: Dip Tracking for Watching, Peak Tracking for In-Trade, and real-time Price History
+              setScalpTrades((prev) => {
+                let hasChanges = false;
+                const next = prev.map((st) => {
+                  if (st.binanceSymbol === symbol) {
+                    const prevHistory = st.priceHistory || [];
+                    const lastRecorded = prevHistory.length > 0 ? prevHistory[prevHistory.length - 1] : null;
+                    let newHistory = prevHistory;
+                    if (lastRecorded !== priceNum) {
+                      newHistory = [...prevHistory, priceNum].slice(-25);
+                      hasChanges = true;
+                    }
+
+                    if (st.status === 'watching') {
+                      const currentDip = st.dipPrice ? parseFloat(st.dipPrice) : priceNum;
+                      if (!st.dipPrice || priceNum < currentDip) {
+                        hasChanges = true;
+                        return {
+                          ...st,
+                          priceHistory: newHistory,
+                          dipPrice: price,
+                          dipTimestamp: Date.now(),
+                        };
+                      }
+
+                      // Check for confirmed bounce above dip
+                      if (currentDip > 0) {
+                        const bouncePercent = ((priceNum - currentDip) / currentDip) * 100;
+                        if (bouncePercent >= (st.bounceTriggerPercent || 0.4)) {
+                          systemNotification.sendNotification({
+                            title: `⚡ ارتداد جاهز للشراء (${st.name})!`,
+                            body: `ارتد سعر ${st.name} بنسبة +${bouncePercent.toFixed(2)}% فوق القاع (${currentDip} USDT). جاهز لسكالبينج سريع!`,
+                            tag: `bounce-${st.id}`,
+                            icon: '/pwa-192x192.png',
+                            badge: '/icon.svg',
+                            renotify: true,
+                          });
+                        }
+                      }
+
+                      if (hasChanges) {
+                        return { ...st, priceHistory: newHistory };
+                      }
+                    } else if (st.status === 'in_trade') {
+                      const entryNum = st.entryPrice ? parseFloat(st.entryPrice) : priceNum;
+                      const currentPeak = st.peakSinceEntry ? parseFloat(st.peakSinceEntry) : entryNum;
+                      if (priceNum > currentPeak) {
+                        hasChanges = true;
+                        return {
+                          ...st,
+                          priceHistory: newHistory,
+                          peakSinceEntry: price,
+                          peakTimestamp: Date.now(),
+                        };
+                      }
+
+                      // Trailing drop warning check
+                      if (entryNum > 0 && currentPeak > entryNum) {
+                        const peakPnl = ((currentPeak - entryNum) / entryNum) * 100;
+                        const dropFromPeak = ((currentPeak - priceNum) / currentPeak) * 100;
+                        if (peakPnl >= 0.5 && dropFromPeak >= (st.trailingDropAlertPercent || 0.35)) {
+                          systemNotification.sendNotification({
+                            title: `⚠️ تحذير هبوط من القمة (${st.name})!`,
+                            body: `هبط سعر ${st.name} بنسبة -${dropFromPeak.toFixed(2)}% عن أعلى قمة (${currentPeak} USDT). يُنصح بالخروج السريع لـ USDT!`,
+                            tag: `trailing-${st.id}`,
+                            icon: '/pwa-192x192.png',
+                            badge: '/icon.svg',
+                            renotify: true,
+                            requireInteraction: true,
+                          });
+                        }
+                      }
+
+                      if (hasChanges) {
+                        return { ...st, priceHistory: newHistory };
+                      }
+                    } else if (hasChanges) {
+                      return { ...st, priceHistory: newHistory };
+                    }
+                  }
+                  return st;
+                });
+
+                if (hasChanges) {
+                  persistScalpTradesRef.current(next);
+                  return next;
+                }
+                return prev;
+              });
             }
           }
         } catch {
@@ -684,8 +932,173 @@ export default function CalculatorPage() {
     };
   }, [isTrackerStreamActive, trackedSymbolsKey]);
 
+  // ----------------------------------------------------
+  // SCALPER ACTIONS & HANDLERS
+  // ----------------------------------------------------
+
+  const handleAddScalpTrade = (name: string) => {
+    const clean = name.trim().toUpperCase();
+    const pair = clean.endsWith('USDT') ? clean : `${clean}USDT`;
+    const liveP = trackerLivePrices[pair] || '';
+    const newTrade: ScalpTrade = {
+      id: `scalp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: clean,
+      binanceSymbol: pair,
+      status: 'watching',
+      dipPrice: liveP || undefined,
+      dipTimestamp: liveP ? Date.now() : undefined,
+      bounceTriggerPercent: 0.4,
+      trailingDropAlertPercent: 0.35,
+      target1Percent: 0.6,
+      target2Percent: 1.2,
+      target3Percent: 2.0,
+      createdAt: Date.now(),
+      notes: '',
+    };
+    const next = [newTrade, ...scalpTrades];
+    setScalpTrades(next);
+    persistScalpTrades(next);
+  };
+
+  const handleUpdateScalpTrade = (updated: ScalpTrade) => {
+    const next = scalpTrades.map((t) => (t.id === updated.id ? updated : t));
+    setScalpTrades(next);
+    persistScalpTrades(next);
+  };
+
+  const handleDeleteScalpTrade = (tradeId: string) => {
+    const next = scalpTrades.filter((t) => t.id !== tradeId);
+    setScalpTrades(next);
+    persistScalpTrades(next);
+  };
+
+  const handleOpenScalpTrade = (tradeId: string, entryPrice: string, amountUsdt: string, coinQuantity?: string) => {
+    const entryNum = parseFloat(entryPrice);
+    const buyFee = parseFloat(defaultFees.entryFeePercent || '0.1') || 0.1;
+    const sellFee = parseFloat(defaultFees.exitFeePercent || '0.1') || 0.1;
+    const bePrice = entryNum > 0 ? (entryNum * (1 + buyFee / 100)) / (1 - sellFee / 100) : 0;
+
+    const next = scalpTrades.map((t) => {
+      if (t.id === tradeId) {
+        return {
+          ...t,
+          status: 'in_trade' as const,
+          entryPrice,
+          allocatedUsdt: amountUsdt,
+          coinQuantity: coinQuantity || undefined,
+          entryTimestamp: Date.now(),
+          breakEvenPrice: bePrice > 0 ? bePrice.toString() : undefined,
+          peakSinceEntry: entryPrice,
+          peakTimestamp: Date.now(),
+        };
+      }
+      return t;
+    });
+    setScalpTrades(next);
+    persistScalpTrades(next);
+  };
+
+  const handleCloseScalpTradeToUsdt = (tradeId: string, exitPrice: string, reason: ScalpTrade['exitReason']) => {
+    const trade = scalpTrades.find((t) => t.id === tradeId);
+    if (!trade || !trade.entryPrice) return;
+
+    const entryNum = parseFloat(trade.entryPrice);
+    const exitNum = parseFloat(exitPrice);
+    const amount = trade.allocatedUsdt ? parseFloat(trade.allocatedUsdt) : 100;
+    const qty = trade.coinQuantity ? parseFloat(trade.coinQuantity) : (entryNum > 0 ? amount / entryNum : 0);
+
+    const diff = exitNum - entryNum;
+    const pnlPercent = entryNum > 0 ? (diff / entryNum) * 100 : 0;
+    const pnlUsdt = diff * qty;
+
+    const durationMinutes = trade.entryTimestamp 
+      ? Math.max(1, Math.round((Date.now() - trade.entryTimestamp) / 60000)) 
+      : 1;
+
+    // Update Session Stats
+    const newCompleted = scalperSession.completedScalps + 1;
+    const newWinning = scalperSession.winningScalps + (pnlUsdt > 0 ? 1 : 0);
+    const newTotalPnl = scalperSession.totalRealizedPnlUsdt + pnlUsdt;
+    const newAvgDuration = Math.round(
+      (scalperSession.avgDurationMinutes * scalperSession.completedScalps + durationMinutes) / newCompleted
+    );
+
+    const updatedSession: ScalperSessionStats = {
+      ...scalperSession,
+      completedScalps: newCompleted,
+      winningScalps: newWinning,
+      totalRealizedPnlUsdt: newTotalPnl,
+      avgDurationMinutes: newAvgDuration,
+    };
+    setScalperSession(updatedSession);
+    persistScalperSession(updatedSession);
+
+    // Update Trade Record
+    const next = scalpTrades.map((t) => {
+      if (t.id === tradeId) {
+        return {
+          ...t,
+          status: 'closed' as const,
+          exitPrice,
+          exitTimestamp: Date.now(),
+          realizedPnlUsdt: pnlUsdt,
+          realizedPnlPercent: pnlPercent,
+          exitReason: reason,
+          holdingDurationMinutes: durationMinutes,
+        };
+      }
+      return t;
+    });
+    setScalpTrades(next);
+    persistScalpTrades(next);
+  };
+
+  const handleUpdateScalperSession = (stats: ScalperSessionStats) => {
+    setScalperSession(stats);
+    persistScalperSession(stats);
+  };
+
+  const handleNavigateToCalculatorFromScalp = (trade?: ScalpTrade) => {
+    if (trade && trade.name) {
+      handleOpenCalculatorForCurrency(trade.name, trade.coinQuantity);
+      if (trade.entryPrice) {
+        setCurrencies((prev) => {
+          const next = prev.map((c) => {
+            if (c.name === trade.name.trim().toUpperCase()) {
+              return { 
+                ...c, 
+                entryPrice: trade.entryPrice!,
+                tradeAmount: trade.allocatedUsdt || c.tradeAmount,
+                coinQuantity: trade.coinQuantity || c.coinQuantity
+              };
+            }
+            return c;
+          });
+          persistCurrencies(next);
+          return next;
+        });
+      }
+    }
+    setActiveMainTab('calculator');
+  };
+
+  const handleNavigateToTrackerFromScalp = (symbol?: string) => {
+    if (symbol) {
+      const clean = symbol.trim().toUpperCase();
+      const match = trackedCurrencies.find((tc) => tc.name === clean);
+      if (match) {
+        setActiveTrackedId(match.id);
+      } else {
+        const pair = clean.endsWith('USDT') ? clean : `${clean}USDT`;
+        const liveP = trackerLivePrices[pair] || '0';
+        handleAddTrackedCurrency(clean, liveP);
+      }
+    }
+    setActiveMainTab('tracker');
+  };
+
   return (
-    <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 overflow-x-hidden transition-colors">
+    <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 pb-28 sm:pb-32 overflow-x-hidden transition-colors">
       {/* Background Ambience and Guide */}
       <WorkspaceBackground 
         mode={activeCurrencyId && activeMainTab === 'calculator' ? windowMode : 'normal'}
@@ -695,49 +1108,84 @@ export default function CalculatorPage() {
       {/* Offline Status Toast */}
       <OfflineIndicator />
 
-      {/* Main Top Navigation Tabs (حاسبة الصفقات والتعادل | رصد صعود العملات) */}
-      <div className="relative z-20 flex items-center p-1 bg-white/70 dark:bg-slate-900/70 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs mb-2">
-        <button
-          onClick={() => setActiveMainTab('calculator')}
-          className={`flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-            activeMainTab === 'calculator'
-              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
-        >
-          <Calculator className="w-4 h-4" />
-          <span>حاسبة الصفقات والتعادل</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-900/10 dark:bg-slate-950/20 font-mono font-bold">
-            {currencies.length}
-          </span>
-        </button>
+      {/* Top Dedicated Control Bar */}
+      <header className="relative z-20 w-full max-w-7xl flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-white/75 dark:bg-slate-900/75 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs mb-3">
+        {/* App Title & Identity */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-slate-950 shadow-md shadow-amber-500/20 font-black">
+            <Zap className="w-5 h-5 fill-current" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-slate-100">
+                بوت مراقبة صعود العملات
+              </h1>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                v2.0 سكالبينج
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              رصد القيعان السريعة • حساب أسعار التعادل • تنبيهات فورية
+            </p>
+          </div>
+        </div>
 
-        <button
-          onClick={() => setActiveMainTab('tracker')}
-          className={`flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-            activeMainTab === 'tracker'
-              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
-        >
-          <TrendingUp className="w-4 h-4" />
-          <span>رصد صعود العملات</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-900/10 dark:bg-slate-950/20 font-mono font-bold">
-            {trackedCurrencies.length}
-          </span>
-        </button>
+        {/* Top Action Controls */}
+        <div className="flex items-center flex-wrap gap-2">
+          {/* Side-by-Side Break-Even Comparison Drawer Trigger */}
+          <button
+            type="button"
+            onClick={() => setIsComparisonOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
+            title="مقارنة أسعار التعادل بين العملات جنباً إلى جنب"
+          >
+            <Columns3 className="w-4 h-4" />
+            <span>مقارنة التعادل</span>
+            {currencies.length > 1 && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-bold">
+                {currencies.length}
+              </span>
+            )}
+          </button>
 
-        {/* Quick Theme Customizer Button in Navigation Bar */}
-        <button
-          type="button"
-          onClick={() => setIsThemeCustomizerOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-300 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-          title="🎨 تخصيص مظهر وألوان الثيم"
-        >
-          <Palette className="w-4 h-4 text-amber-500" />
-          <span className="hidden sm:inline">ألوان الثيم</span>
-        </button>
-      </div>
+          {/* Theme Customizer */}
+          <button
+            type="button"
+            onClick={() => setIsThemeCustomizerOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
+            title="ألوان وتخصيص المظهر"
+          >
+            <Palette className="w-4 h-4 text-amber-500" />
+            <span className="hidden md:inline">ألوان الثيم</span>
+          </button>
+
+          {/* Global Fee Settings */}
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
+            title="إعدادات الرسوم الافتراضية"
+          >
+            <Settings className="w-4 h-4 text-slate-500" />
+            <span className="hidden md:inline">الإعدادات</span>
+          </button>
+
+          {/* Binance Stream Status */}
+          <button
+            type="button"
+            onClick={() => handleToggleTrackerStream(!isTrackerStreamActive)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
+              isTrackerStreamActive
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-500'
+            }`}
+            title={isTrackerStreamActive ? 'بث بينانس اللحظي نشط — انقر للإيقاف' : 'بث بينانس متوقف — انقر للتشغيل'}
+          >
+            <Radio className={`w-3.5 h-3.5 ${isTrackerStreamActive ? 'animate-pulse text-emerald-500' : ''}`} />
+            <span className="hidden sm:inline">{isTrackerStreamActive ? 'بينانس متصل' : 'البث متوقف'}</span>
+          </button>
+        </div>
+      </header>
 
       {/* MAIN VIEW CONTENT CONTAINER */}
       <div className="relative z-10 w-full flex justify-center py-2">
@@ -770,6 +1218,8 @@ export default function CalculatorPage() {
               onBackToDashboard={() => setActiveCurrencyId(null)}
               percentTrack={calculationResult.percentTrack}
               fixedTrack={calculationResult.fixedTrack}
+              isReadOnly={isCalculatorReadOnly}
+              onToggleReadOnly={() => setIsCalculatorReadOnly((prev) => !prev)}
             >
               {/* Section 0: Live Monitoring & Alerts from Binance (وضع المراقبة اللحظية والتنبيهات) */}
               <LiveMonitoringSection
@@ -838,6 +1288,7 @@ export default function CalculatorPage() {
                 }
                 trackedPoints={activeCurrencyTrackedPoints}
                 onAddTestPriceWithVal={handleAddTestPriceWithVal}
+                isReadOnly={isCalculatorReadOnly}
               />
 
               {/* Section 2: Break-Even Price (سعر التعادل) */}
@@ -856,6 +1307,7 @@ export default function CalculatorPage() {
                 onRemoveTestPrice={handleRemoveTestPrice}
                 percentTrack={calculationResult.percentTrack}
                 fixedTrack={calculationResult.fixedTrack}
+                isReadOnly={isCalculatorReadOnly}
               />
 
               {/* Section 4: Interactive Profit/Loss Chart (الرسم البياني التفاعلي للأرباح والخسائر) */}
@@ -907,6 +1359,30 @@ export default function CalculatorPage() {
             />
           )
         )}
+
+        {/* ========================================================= */}
+        {/* TAB 3: SCALPER TAB (لوحة السكالبينج ورصد القيعان)          */}
+        {/* ========================================================= */}
+        {activeMainTab === 'scalper' && (
+          <ScalperDashboard
+            trades={scalpTrades}
+            livePrices={trackerLivePrices}
+            isLiveStreamActive={isTrackerStreamActive}
+            sessionStats={scalperSession}
+            defaultEntryFeePercent={defaultFees.entryFeePercent || '0.1'}
+            defaultExitFeePercent={defaultFees.exitFeePercent || '0.1'}
+            onToggleLiveStream={handleToggleTrackerStream}
+            onUpdateSessionStats={handleUpdateScalperSession}
+            onAddTrade={handleAddScalpTrade}
+            onUpdateTrade={handleUpdateScalpTrade}
+            onDeleteTrade={handleDeleteScalpTrade}
+            onOpenTrade={handleOpenScalpTrade}
+            onCloseTradeToUsdt={handleCloseScalpTradeToUsdt}
+            onNavigateToCalculator={handleNavigateToCalculatorFromScalp}
+            onNavigateToTracker={handleNavigateToTrackerFromScalp}
+            onOpenThemeCustomizer={() => setIsThemeCustomizerOpen(true)}
+          />
+        )}
       </div>
 
       {/* Settings Modal */}
@@ -923,6 +1399,88 @@ export default function CalculatorPage() {
         isOpen={isThemeCustomizerOpen}
         onClose={() => setIsThemeCustomizerOpen(false)}
       />
+
+      {/* Side-by-Side Break-Even Comparison Drawer */}
+      <BreakEvenComparisonDrawer
+        isOpen={isComparisonOpen}
+        onClose={() => setIsComparisonOpen(false)}
+        currencies={currencies}
+        livePrices={trackerLivePrices}
+        onSelectCurrencyForCalculator={(id) => {
+          setActiveCurrencyId(id);
+          setActiveMainTab('calculator');
+          setIsComparisonOpen(false);
+        }}
+      />
+
+      {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة للعناصر الثلاثة) */}
+      <nav 
+        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200/90 dark:border-slate-800/90 py-2 px-3 sm:px-6 shadow-[0_-4px_25px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_25px_rgba(0,0,0,0.5)]"
+        dir="rtl"
+        aria-label="القائمة الرئيسية الثابتة"
+      >
+        <div className="max-w-2xl mx-auto grid grid-cols-3 gap-2">
+          {/* Item 1: حاسبة التجارة والتعادل */}
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('calculator')}
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-2 sm:px-4 rounded-2xl transition-all cursor-pointer ${
+              activeMainTab === 'calculator'
+                ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 font-semibold'
+            }`}
+          >
+            <Calculator className={`w-5 h-5 ${activeMainTab === 'calculator' ? 'stroke-[2.5]' : ''}`} />
+            <span className="text-[11px] sm:text-xs tracking-tight">حاسبة التجارة والتعادل</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+              activeMainTab === 'calculator' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+            }`}>
+              {currencies.length}
+            </span>
+          </button>
+
+          {/* Item 2: لوحة السكالبينج السريعة */}
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('scalper')}
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-2 sm:px-4 rounded-2xl transition-all cursor-pointer relative ${
+              activeMainTab === 'scalper'
+                ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 font-semibold'
+            }`}
+          >
+            <Zap className={`w-5 h-5 ${activeMainTab === 'scalper' ? 'fill-current' : ''}`} />
+            <span className="text-[11px] sm:text-xs tracking-tight">لوحة السكالبينج السريعة</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+              activeMainTab === 'scalper' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+            }`}>
+              {scalpTrades.length}
+            </span>
+            {scalpTrades.some((t) => t.status === 'in_trade') && (
+              <span className="absolute top-1.5 left-2 w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+            )}
+          </button>
+
+          {/* Item 3: ترجمات عاجلة (رصد صعود العملات) */}
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('tracker')}
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-2 sm:px-4 rounded-2xl transition-all cursor-pointer ${
+              activeMainTab === 'tracker'
+                ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 font-semibold'
+            }`}
+          >
+            <TrendingUp className={`w-5 h-5 ${activeMainTab === 'tracker' ? 'stroke-[2.5]' : ''}`} />
+            <span className="text-[11px] sm:text-xs tracking-tight">ترجمات عاجلة (رصد)</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+              activeMainTab === 'tracker' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+            }`}>
+              {trackedCurrencies.length}
+            </span>
+          </button>
+        </div>
+      </nav>
     </main>
   );
 }

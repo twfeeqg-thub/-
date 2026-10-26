@@ -16,6 +16,8 @@ interface FloatingContainerProps {
   onBackToDashboard?: () => void;
   percentTrack: CalculationTrackResult;
   fixedTrack: CalculationTrackResult;
+  isReadOnly?: boolean;
+  onToggleReadOnly?: () => void;
 }
 
 export const FloatingContainer: React.FC<FloatingContainerProps> = ({
@@ -29,6 +31,8 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
   onBackToDashboard,
   percentTrack,
   fixedTrack,
+  isReadOnly = false,
+  onToggleReadOnly,
 }) => {
   // Floating Window Coordinates & Dimensions (static initial values for SSR consistency)
   const [position, setPosition] = useState({ x: 20, y: 30 });
@@ -235,6 +239,8 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
             hasDefaultsSaved={hasDefaultsSaved}
             currencyName={currencyName}
             onBackToDashboard={onBackToDashboard}
+            isReadOnly={isReadOnly}
+            onToggleReadOnly={onToggleReadOnly}
           />
         </div>
 
@@ -284,6 +290,8 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
             hasDefaultsSaved={hasDefaultsSaved}
             currencyName={currencyName}
             onBackToDashboard={onBackToDashboard}
+            isReadOnly={isReadOnly}
+            onToggleReadOnly={onToggleReadOnly}
           />
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 text-right">
             {children}
@@ -304,6 +312,8 @@ export const FloatingContainer: React.FC<FloatingContainerProps> = ({
         hasDefaultsSaved={hasDefaultsSaved}
         currencyName={currencyName}
         onBackToDashboard={onBackToDashboard}
+        isReadOnly={isReadOnly}
+        onToggleReadOnly={onToggleReadOnly}
       />
       <div className="p-3.5 sm:p-5 space-y-4 text-right">
         {children}

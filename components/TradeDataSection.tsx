@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { DollarSign, Percent, AlertCircle, Clock, Target } from 'lucide-react';
+import { DollarSign, Percent, AlertCircle, Clock, Target, Lock } from 'lucide-react';
 
 export interface TrackedPricePoints {
   baselinePrice?: string;
@@ -29,6 +29,7 @@ interface TradeDataSectionProps {
   errorMessage?: string;
   trackedPoints?: TrackedPricePoints;
   onAddTestPriceWithVal?: (val: string) => void;
+  isReadOnly?: boolean;
 }
 
 export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
@@ -50,6 +51,7 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
   errorMessage,
   trackedPoints,
   onAddTestPriceWithVal,
+  isReadOnly = false,
 }) => {
   const hasPercent = entryFeePercent.trim() !== '' || exitFeePercent.trim() !== '';
   const hasFixed = entryFeeFixed.trim() !== '' || exitFeeFixed.trim() !== '';
@@ -167,6 +169,16 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
         </div>
       )}
 
+      {/* Read-Only Mode Notice Banner */}
+      {isReadOnly && (
+        <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-xs font-bold animate-in fade-in">
+          <div className="flex items-center gap-1.5">
+            <Lock className="w-4 h-4 text-amber-500" />
+            <span>وضع القراءة فقط مفعّل — الحقول مقفلة لمنع أي تعديل غير مقصود أثناء متابعة الأسعار</span>
+          </div>
+        </div>
+      )}
+
       {/* Primary Inputs Grid: Entry Price & Trade Amount & Coin Quantity */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
         {/* Entry Price */}
@@ -181,7 +193,10 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
               placeholder="مثال: 0.03152 أو 0.00000123"
               value={entryPrice}
               onChange={(e) => onChangeEntryPrice(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700/80 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition text-left font-mono"
+              disabled={isReadOnly}
+              className={`w-full bg-slate-50 dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700/80 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition text-left font-mono ${
+                isReadOnly ? 'opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-800/60' : ''
+              }`}
               dir="ltr"
             />
           </div>
@@ -202,7 +217,10 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
               placeholder="مثال: 10 أو 100"
               value={tradeAmount}
               onChange={(e) => onChangeTradeAmount(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700/80 rounded-xl pl-14 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition text-left font-mono"
+              disabled={isReadOnly}
+              className={`w-full bg-slate-50 dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700/80 rounded-xl pl-14 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition text-left font-mono ${
+                isReadOnly ? 'opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-800/60' : ''
+              }`}
               dir="ltr"
             />
             <span className="absolute left-2.5 text-[11px] font-bold text-slate-400 select-none">
@@ -229,7 +247,10 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
               placeholder="مثال: 50 أو 1.5"
               value={coinQuantity || ''}
               onChange={(e) => onChangeCoinQuantity && onChangeCoinQuantity(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700/80 rounded-xl pl-16 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition text-left font-mono"
+              disabled={isReadOnly}
+              className={`w-full bg-slate-50 dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700/80 rounded-xl pl-16 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition text-left font-mono ${
+                isReadOnly ? 'opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-800/60' : ''
+              }`}
               dir="ltr"
             />
             <span className="absolute left-2.5 text-[11px] font-bold text-slate-400 select-none max-w-[55px] truncate" title={currencyName}>
@@ -267,7 +288,10 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
                 placeholder="0.0%"
                 value={entryFeePercent}
                 onChange={(e) => onChangeEntryFeePercent(e.target.value)}
-                className="w-full bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-lg pl-7 pr-2.5 py-1.5 text-xs text-slate-900 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 text-left font-mono"
+                disabled={isReadOnly}
+                className={`w-full bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-lg pl-7 pr-2.5 py-1.5 text-xs text-slate-900 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 text-left font-mono ${
+                  isReadOnly ? 'opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-800/60' : ''
+                }`}
                 dir="ltr"
               />
               <span className="absolute left-2 text-slate-400 select-none">
@@ -282,7 +306,10 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
                 placeholder="0.00 USDT"
                 value={entryFeeFixed}
                 onChange={(e) => onChangeEntryFeeFixed(e.target.value)}
-                className="w-full bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-lg pl-7 pr-2.5 py-1.5 text-xs text-slate-900 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 text-left font-mono"
+                disabled={isReadOnly}
+                className={`w-full bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-lg pl-7 pr-2.5 py-1.5 text-xs text-slate-900 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 text-left font-mono ${
+                  isReadOnly ? 'opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-800/60' : ''
+                }`}
                 dir="ltr"
               />
               <span className="absolute left-2 text-slate-400 select-none">
@@ -306,7 +333,10 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
                 placeholder="0.0%"
                 value={exitFeePercent}
                 onChange={(e) => onChangeExitFeePercent(e.target.value)}
-                className="w-full bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-lg pl-7 pr-2.5 py-1.5 text-xs text-slate-900 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 text-left font-mono"
+                disabled={isReadOnly}
+                className={`w-full bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-lg pl-7 pr-2.5 py-1.5 text-xs text-slate-900 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 text-left font-mono ${
+                  isReadOnly ? 'opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-800/60' : ''
+                }`}
                 dir="ltr"
               />
               <span className="absolute left-2 text-slate-400 select-none">
@@ -321,7 +351,10 @@ export const TradeDataSection: React.FC<TradeDataSectionProps> = ({
                 placeholder="0.00 USDT"
                 value={exitFeeFixed}
                 onChange={(e) => onChangeExitFeeFixed(e.target.value)}
-                className="w-full bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-lg pl-7 pr-2.5 py-1.5 text-xs text-slate-900 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 text-left font-mono"
+                disabled={isReadOnly}
+                className={`w-full bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-lg pl-7 pr-2.5 py-1.5 text-xs text-slate-900 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-amber-500 text-left font-mono ${
+                  isReadOnly ? 'opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-800/60' : ''
+                }`}
                 dir="ltr"
               />
               <span className="absolute left-2 text-slate-400 select-none">

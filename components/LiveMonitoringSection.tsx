@@ -15,9 +15,15 @@ import {
   Zap,
   Edit2,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Music,
+  CheckCircle2,
+  Send,
+  Smartphone
 } from 'lucide-react';
-import { soundAlert } from '@/lib/soundAlert';
+import { soundAlert, ALERT_TONE_OPTIONS, AlertToneId } from '@/lib/soundAlert';
+import { systemNotification } from '@/lib/systemNotification';
+import { useSystemNotification } from '@/hooks/useSystemNotification';
 import { formatCurrencyPrice } from '@/lib/calculator';
 
 interface LiveMonitoringSectionProps {
@@ -78,16 +84,21 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [targetReached, setTargetReached] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [selectedTone, setSelectedTone] = useState<AlertToneId>(() => soundAlert.getActiveTone());
   const [isEditingSymbol, setIsEditingSymbol] = useState(false);
   const [customInputSymbol, setCustomInputSymbol] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const [browserNotificationEnabled, setBrowserNotificationEnabled] = useState<boolean>(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      return Notification.permission === 'granted';
-    }
-    return false;
-  });
+  // System Push Notification Hook (Desktop & Mobile)
+  const { 
+    isSupported: notifSupported, 
+    permission: notifPermission, 
+    isGranted: notifGranted, 
+    isDenied: notifDenied, 
+    requestPermission: requestNotifPermission, 
+    sendTestNotification, 
+    isTesting: isNotifTesting 
+  } = useSystemNotification();
 
   const wsRef = useRef<WebSocket | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -95,17 +106,6 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
 
   // Symbol resolution
   const formattedSymbol = resolveBinanceSymbol(currencyName, binanceSymbol);
-
-  // Request browser notification permission
-  const handleRequestNotification = async () => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    try {
-      const perm = await Notification.requestPermission();
-      setBrowserNotificationEnabled(perm === 'granted');
-    } catch {
-      // Ignore
-    }
-  };
 
   // Toggle sound alert
   const toggleSound = () => {
@@ -131,21 +131,22 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
       if (now - lastAlertTimeRef.current > 10000) {
         lastAlertTimeRef.current = now;
         if (soundEnabled) {
-          soundAlert.playTargetReachedAlert();
+          soundAlert.playTargetReachedAlert(selectedTone);
         }
-        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-          try {
-            new Notification(`🎯 وصل السعر للهدف (${formattedSymbol})!`, {
-              body: `السعر الحالي ${livePrice} وصل إلى سعرك المستهدف ${targetNum} USDT.`,
-              icon: '/icons/icon-192x192.png',
-            });
-          } catch {
-            // Ignore
-          }
-        }
+        // Send rich Desktop/Mobile system push notification via Notification API & Service Worker
+        systemNotification.sendNotification({
+          title: `🎯 وصل السعر للهدف (${formattedSymbol})!`,
+          body: `السعر الحالي ${livePrice} USDT وصل إلى سعرك المستهدف ${targetNum} USDT (${targetDirection === 'above' ? 'صعوداً 📈' : 'هبوطاً 📉'}).`,
+          tag: `target-${formattedSymbol}`,
+          icon: '/pwa-192x192.png',
+          badge: '/icon.svg',
+          renotify: true,
+          requireInteraction: true,
+          vibrate: [300, 150, 300, 150, 450],
+        });
       }
     }
-  }, [targetPrice, targetDirection, soundEnabled, formattedSymbol]);
+  }, [targetPrice, targetDirection, soundEnabled, selectedTone, formattedSymbol]);
 
   // Fetch price from REST API with strict timeout
   const fetchPriceRest = useCallback(async (symbol: string) => {
@@ -651,31 +652,103 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
                 <span>{soundEnabled ? 'صوت التنبيه مفعل 🔔' : 'صوت التنبيه مكتوم 🔇'}</span>
               </button>
 
-              {/* Notification Permission */}
-              <button
-                type="button"
-                onClick={handleRequestNotification}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition cursor-pointer ${
-                  browserNotificationEnabled
-                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
-                }`}
-                title="إشعارات المتصفح والنظام"
-              >
-                {browserNotificationEnabled ? <Bell className="w-3.5 h-3.5 text-emerald-500" /> : <BellOff className="w-3.5 h-3.5" />}
-                <span>{browserNotificationEnabled ? 'إشعارات المتصفح مفعلة' : 'طلب إذن إشعارات النظام'}</span>
-              </button>
+              {/* System Push Notification Control (Desktop & Mobile) */}
+              {notifGranted ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <Bell className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>إشعارات النظام نشطة</span>
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={sendTestNotification}
+                    disabled={isNotifTesting}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 transition cursor-pointer"
+                    title="إرسال إشعار فوري تجريبي لسطح المكتب / الهاتف"
+                  >
+                    <Send className={`w-3 h-3 text-amber-500 ${isNotifTesting ? 'animate-bounce' : ''}`} />
+                    <span>{isNotifTesting ? 'جاري الإرسال...' : 'تجربة إشعار push'}</span>
+                  </button>
+                </div>
+              ) : notifDenied ? (
+                <span 
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                  title="قم بتمكين الإشعارات من إعدادات المتصفح أو قفل الأمان بجانب عنوان الموقع"
+                >
+                  <BellOff className="w-3.5 h-3.5" />
+                  <span>الإشعارات محظورة بالمتصفح</span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={requestNotifPermission}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-bold bg-amber-500 text-slate-950 border-amber-600 shadow-sm hover:bg-amber-400 transition cursor-pointer"
+                  title="تفعيل إشعارات سطح المكتب والهاتف لتصلك التنبيهات حتى في الخلفية"
+                >
+                  <Bell className="w-3.5 h-3.5 animate-bounce" />
+                  <span>تفعيل إشعارات سطح المكتب / الهاتف 🔔</span>
+                </button>
+              )}
             </div>
 
             {/* Test sound button */}
             <button
               type="button"
-              onClick={() => soundAlert.playTargetReachedAlert()}
-              className="text-[11px] text-slate-500 hover:text-amber-500 underline transition cursor-pointer"
+              onClick={() => soundAlert.playTargetReachedAlert(selectedTone)}
+              className="text-[11px] text-slate-500 hover:text-amber-500 underline transition cursor-pointer flex items-center gap-1"
             >
-              تجربة صوت الرنين
+              <Volume2 className="w-3 h-3 text-amber-500" />
+              <span>تجربة رنين الهدف ({ALERT_TONE_OPTIONS.find((t) => t.id === selectedTone)?.name || 'الافتراضي'})</span>
             </button>
           </div>
+
+          {/* Subtext info for background notifications */}
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 pt-1">
+            <Smartphone className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <span>
+              تدعم إشعارات النظام الظهور في شريط إشعارات Windows / Mac / Android حتى عند تصغير المتصفح أو ترك التبويب في الخلفية.
+            </span>
+          </div>
+
+          {/* Tone Customization Selector Panel */}
+          {soundEnabled && (
+            <div className="p-2.5 rounded-xl bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Music className="w-3.5 h-3.5 text-amber-500" />
+                  <span>تخصيص نغمة تنبيه الوصول للهدف:</span>
+                </span>
+                <span className="text-[10px] text-slate-400">اختر النغمة المفضلة لك</span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                {ALERT_TONE_OPTIONS.map((tone) => {
+                  const isSelected = selectedTone === tone.id;
+                  return (
+                    <button
+                      key={tone.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTone(tone.id);
+                        soundAlert.setActiveTone(tone.id);
+                        soundAlert.playTone(tone.id);
+                      }}
+                      className={`px-2 py-1.5 rounded-lg text-xs font-medium border text-center transition flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-500 text-slate-950 font-bold border-amber-500 shadow-xs'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-400'
+                      }`}
+                      title={tone.description}
+                    >
+                      <span className="text-xs">{tone.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

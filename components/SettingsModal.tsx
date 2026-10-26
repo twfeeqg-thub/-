@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Check, Trash2, SlidersHorizontal, Info, Palette, Sun, Moon, Laptop } from 'lucide-react';
+import { X, Check, Trash2, SlidersHorizontal, Info, Palette, Sun, Moon, Laptop, Bell, BellOff, Smartphone, Send } from 'lucide-react';
 import { FeeCalculationMethod, ThemeMode, AccentColor } from '@/types/currency';
 import { useTheme } from '@/context/ThemeContext';
+import { useSystemNotification } from '@/hooks/useSystemNotification';
 
 export interface DefaultFeeSettings {
   entryFeePercent: string;
@@ -29,6 +30,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClearDefaults,
 }) => {
   const { themeMode, setThemeMode, accentColor, setAccentColor } = useTheme();
+  const { 
+    isGranted: notifGranted, 
+    isDenied: notifDenied, 
+    requestPermission: requestNotifPermission, 
+    sendTestNotification, 
+    isTesting: isNotifTesting 
+  } = useSystemNotification();
 
   const [form, setForm] = useState<DefaultFeeSettings>({ 
     ...currentSettings,
@@ -292,6 +300,57 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   dir="ltr"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* Desktop & Mobile Push Notification API Settings */}
+          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <Bell className="w-4 h-4 text-amber-500" />
+                <span>إشعارات النظام (Desktop / Mobile Push)</span>
+              </span>
+              {notifGranted ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  مفعلة
+                </span>
+              ) : notifDenied ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-rose-500/15 text-rose-500 border border-rose-500/30">
+                  محظورة بالمتصفح
+                </span>
+              ) : (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400">
+                  في انتظار الإذن
+                </span>
+              )}
+            </div>
+
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+              تضمن هذه الميزة ظهور تنبيهات وصول الأسعار وأهداف السكالبينج في شريط إشعارات نظام التشغيل (ويندوز / ماك / أندرويد) حتى عندما يكون المتصفح مصغراً أو التبويب غير نشط.
+            </p>
+
+            <div className="flex items-center gap-2 pt-1">
+              {!notifGranted ? (
+                <button
+                  type="button"
+                  onClick={requestNotifPermission}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition cursor-pointer"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>تفعيل إشعارات سطح المكتب والهاتف</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={sendTestNotification}
+                  disabled={isNotifTesting}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs hover:bg-slate-300 dark:hover:bg-slate-600 transition cursor-pointer"
+                >
+                  <Send className={`w-3.5 h-3.5 text-amber-500 ${isNotifTesting ? 'animate-bounce' : ''}`} />
+                  <span>{isNotifTesting ? 'جاري إرسال الإشعار التجريبي...' : 'إرسال إشعار تجريبي لاختبار الخلفية 🚀'}</span>
+                </button>
+              )}
             </div>
           </div>
 

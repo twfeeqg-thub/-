@@ -22,6 +22,7 @@ interface TestPricesSectionProps {
   onRemoveTestPrice: (index: number) => void;
   percentTrack: CalculationTrackResult;
   fixedTrack: CalculationTrackResult;
+  isReadOnly?: boolean;
 }
 
 export const TestPricesSection: React.FC<TestPricesSectionProps> = ({
@@ -31,6 +32,7 @@ export const TestPricesSection: React.FC<TestPricesSectionProps> = ({
   onRemoveTestPrice,
   percentTrack,
   fixedTrack,
+  isReadOnly = false,
 }) => {
   const canAddMore = testPrices.length < MAX_TEST_PRICES;
   const showPercentResults = percentTrack.hasTrack && percentTrack.isValid;
@@ -87,7 +89,7 @@ export const TestPricesSection: React.FC<TestPricesSectionProps> = ({
           </span>
         </div>
 
-        {canAddMore && (
+        {canAddMore && !isReadOnly && (
           <button
             type="button"
             onClick={onAddTestPrice}
@@ -132,13 +134,16 @@ export const TestPricesSection: React.FC<TestPricesSectionProps> = ({
                     placeholder="مثال: 0.03180"
                     value={price}
                     onChange={(e) => onChangeTestPrice(idx, e.target.value)}
-                    className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-sky-500 font-mono text-left"
+                    disabled={isReadOnly}
+                    className={`w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-hidden focus:border-sky-500 font-mono text-left ${
+                      isReadOnly ? 'opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-900' : ''
+                    }`}
                     dir="ltr"
                   />
                 </div>
 
-                {/* Delete button (available if there are more than 1, or always so user can clear/remove) */}
-                {testPrices.length > 1 && (
+                {/* Delete button */}
+                {testPrices.length > 1 && !isReadOnly && (
                   <button
                     type="button"
                     onClick={() => onRemoveTestPrice(idx)}
