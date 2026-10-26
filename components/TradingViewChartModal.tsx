@@ -216,7 +216,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   const [lineEditorTextSize, setLineEditorTextSize] = useState<'sm' | 'base' | 'lg'>('sm');
   const [lineEditorAlert, setLineEditorAlert] = useState<boolean>(false);
 
-  // Context Menu State for Long-Press / Right-Click on Chart
+  // Context Menu State for Right-Click on Chart
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
     x: number;
@@ -224,8 +224,8 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     estimatedPrice?: number;
   }>({ visible: false, x: 0, y: 0 });
 
+  const [showLinesManager, setShowLinesManager] = useState<boolean>(false);
   const chartOverlayRef = useRef<HTMLDivElement | null>(null);
-  const touchTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 1. DYNAMIC IN-CHART LEVEL LINES:
   // Instead of static positions, Entry & Break-Even lines position dynamically relative to Live Price!
@@ -503,27 +503,15 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     persistCustomLines(next);
   };
 
-  // -------------------------------------------------------------
-  // CONTEXT MENU (LONG-PRESS OR RIGHT-CLICK)
-  // -------------------------------------------------------------
-  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    const clientX = touch.clientX;
-    const clientY = touch.clientY;
-
-    touchTimerRef.current = setTimeout(() => {
-      openContextMenuAt(clientX, clientY);
-    }, 450);
+  const handleClearAllLines = () => {
+    setCustomLines([]);
+    persistCustomLines([]);
+    setShowLinesManager(false);
   };
 
-  const handleTouchEnd = () => {
-    if (touchTimerRef.current) {
-      clearTimeout(touchTimerRef.current);
-      touchTimerRef.current = null;
-    }
-  };
-
+  // -------------------------------------------------------------
+  // CONTEXT MENU (RIGHT-CLICK ON DESKTOP)
+  // -------------------------------------------------------------
   const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     openContextMenuAt(e.clientX, e.clientY);
@@ -860,6 +848,19 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 <span className="text-[11px]">رسم خط</span>
               </button>
 
+              {/* Lines Manager & Delete Button (Visible if custom lines exist) */}
+              {customLines.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowLinesManager(true)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-600 dark:text-rose-300 font-bold text-xs transition cursor-pointer"
+                  title={`إدارة أو حذف خطوط الشارت (${customLines.length})`}
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                  <span className="text-[11px]">الخطوط ({customLines.length})</span>
+                </button>
+              )}
+
               {/* Exit Alert Target Button */}
               <button
                 type="button"
@@ -1026,8 +1027,6 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
         <div 
           ref={chartOverlayRef}
           onContextMenu={handleContextMenu}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
           className={`relative flex-1 w-full h-full min-h-[350px] ${isDark ? 'bg-slate-950' : 'bg-white'}`}
         >
           <iframe
@@ -1143,30 +1142,37 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                     )}
 
                     {/* Actions and Price Badge on the Right */}
-                    <div className="flex items-center gap-1 ml-1 select-none">
-                      {/* Edit / Delete Buttons on Hover */}
-                      <div className="opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5 bg-slate-900/90 p-0.5 rounded-md border border-slate-700">
-                        <button
-                          type="button"
-                          onClick={() => handleEditLine(line)}
-                          className="p-1 hover:text-amber-400 text-slate-300 cursor-pointer"
-                          title="تعديل الخط"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteLine(line.id)}
-                          className="p-1 hover:text-rose-400 text-slate-300 cursor-pointer"
-                          title="حذف الخط"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
+                    <div className="flex items-center gap-1 ml-1 select-none pointer-events-auto">
+                      {/* Always-visible Quick Delete Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteLine(line.id);
+                        }}
+                        className="p-1 px-1.5 rounded-md bg-rose-600 hover:bg-rose-500 text-white shadow-md cursor-pointer transition flex items-center gap-0.5"
+                        title="حذف هذا الخط من الشارت فوراً"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span className="text-[10px] font-bold">حذف</span>
+                      </button>
+
+                      {/* Quick Edit Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditLine(line);
+                        }}
+                        className="p-1 rounded-md bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-600 cursor-pointer transition"
+                        title="تعديل هذا الخط"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
 
                       {/* Right Price Badge */}
                       <div 
-                        className="flex items-center gap-1 px-2 py-0.5 rounded-l-md font-mono font-black text-xs text-white shadow-lg border border-white/30 cursor-pointer"
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-l-md font-mono font-black text-xs text-white shadow-lg border border-white/30 cursor-pointer hover:brightness-110 transition"
                         style={{ backgroundColor: line.color }}
                         onClick={() => handleEditLine(line)}
                         title="انقر لتعديل هذا الخط"
@@ -1182,84 +1188,112 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
           )}
 
           {/* ======================================================================= */}
-          {/* CONTEXT MENU ON LONG PRESS / RIGHT-CLICK (قائمة منبثقة تفاعلية)          */}
+          {/* CONTEXT MENU ON RIGHT-CLICK (قائمة منبثقة تفاعلية مع إغلاق سهل)           */}
           {/* ======================================================================= */}
           {contextMenu.visible && (
-            <div 
-              className={`fixed z-50 min-w-[200px] p-1.5 rounded-2xl border shadow-2xl backdrop-blur-xl animate-fadeIn ${
-                isDark ? 'bg-slate-900/95 border-slate-700 text-white shadow-black/80' : 'bg-white/95 border-slate-300 text-slate-950 shadow-slate-400/50'
-              }`}
-              style={{ left: contextMenu.x, top: contextMenu.y }}
-              dir="rtl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center justify-between">
-                <span>خيارات الشارت السريعة:</span>
-                {contextMenu.estimatedPrice && (
-                  <span className="font-mono font-black text-amber-500" dir="ltr">
-                    ${contextMenu.estimatedPrice.toFixed(2)}
-                  </span>
-                )}
-              </div>
+            <>
+              {/* Invisible backdrop for instant dismissal by tapping anywhere outside */}
+              <div 
+                className="fixed inset-0 z-45 bg-black/30 backdrop-blur-[1px] cursor-pointer"
+                onClick={() => setContextMenu({ visible: false, x: 0, y: 0 })}
+              />
 
-              <div className="space-y-1 pt-1 text-xs">
-                {/* 1. رسم خط أفقي هنا */}
-                <button
-                  type="button"
-                  onClick={() => handleOpenAddLine(contextMenu.estimatedPrice)}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-cyan-500/15 hover:text-cyan-600 dark:hover:text-cyan-400 text-right transition cursor-pointer font-bold"
-                >
-                  <Plus className="w-3.5 h-3.5 text-cyan-500" />
-                  <span>رسم خط أفقي هنا</span>
-                </button>
+              <div 
+                className={`fixed z-50 min-w-[220px] p-2 rounded-2xl border shadow-2xl backdrop-blur-xl animate-fadeIn ${
+                  isDark ? 'bg-slate-900/95 border-slate-700 text-white shadow-black/80' : 'bg-white/95 border-slate-300 text-slate-950 shadow-slate-400/50'
+                }`}
+                style={{ left: contextMenu.x, top: contextMenu.y }}
+                dir="rtl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                  <span>خيارات الشارت السريعة:</span>
+                  <div className="flex items-center gap-2">
+                    {contextMenu.estimatedPrice && (
+                      <span className="font-mono font-black text-amber-500" dir="ltr">
+                        ${contextMenu.estimatedPrice.toFixed(2)}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setContextMenu({ visible: false, x: 0, y: 0 })}
+                      className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                      title="إغلاق القائمة"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
 
-                {/* 2. تعيين هدف خروج وتنبيه */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (contextMenu.estimatedPrice) {
-                      setExitAlertPrice(contextMenu.estimatedPrice.toFixed(2));
-                    }
-                    setShowExitAlertModal(true);
-                    setContextMenu({ visible: false, x: 0, y: 0 });
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-pink-500/15 hover:text-pink-600 dark:hover:text-pink-400 text-right transition cursor-pointer font-bold"
-                >
-                  <Target className="w-3.5 h-3.5 text-pink-500" />
-                  <span>تعيين هدف خروج وتنبيه</span>
-                </button>
+                <div className="space-y-1 pt-1.5 text-xs">
+                  {/* 1. رسم خط أفقي هنا */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddLine(contextMenu.estimatedPrice)}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-cyan-500/15 hover:text-cyan-600 dark:hover:text-cyan-400 text-right transition cursor-pointer font-bold"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-cyan-500" />
+                    <span>رسم خط أفقي هنا</span>
+                  </button>
 
-                {/* 3. فتح في الحاسبة كسعر دخول */}
-                {onNavigateToCalculator && (
+                  {/* 2. تعيين هدف خروج وتنبيه */}
                   <button
                     type="button"
                     onClick={() => {
-                      onNavigateToCalculator(baseAsset, contextMenu.estimatedPrice?.toFixed(2));
-                      onClose();
+                      if (contextMenu.estimatedPrice) {
+                        setExitAlertPrice(contextMenu.estimatedPrice.toFixed(2));
+                      }
+                      setShowExitAlertModal(true);
+                      setContextMenu({ visible: false, x: 0, y: 0 });
                     }}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-amber-500/15 hover:text-amber-600 dark:hover:text-amber-400 text-right transition cursor-pointer font-bold"
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-pink-500/15 hover:text-pink-600 dark:hover:text-pink-400 text-right transition cursor-pointer font-bold"
                   >
-                    <Calculator className="w-3.5 h-3.5 text-amber-500" />
-                    <span>شراء / فتح بالحاسبة</span>
+                    <Target className="w-3.5 h-3.5 text-pink-500" />
+                    <span>تعيين هدف خروج وتنبيه</span>
                   </button>
-                )}
 
-                {/* 4. فتح في لوحة السكالبينج */}
-                {onNavigateToScalper && (
+                  {/* 3. فتح في الحاسبة كسعر دخول */}
+                  {onNavigateToCalculator && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNavigateToCalculator(baseAsset, contextMenu.estimatedPrice?.toFixed(2));
+                        onClose();
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-amber-500/15 hover:text-amber-600 dark:hover:text-amber-400 text-right transition cursor-pointer font-bold"
+                    >
+                      <Calculator className="w-3.5 h-3.5 text-amber-500" />
+                      <span>شراء / فتح بالحاسبة</span>
+                    </button>
+                  )}
+
+                  {/* 4. فتح في لوحة السكالبينج */}
+                  {onNavigateToScalper && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNavigateToScalper(baseAsset);
+                        onClose();
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-400 text-right transition cursor-pointer font-bold"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>بيع / فتح بالسكالبينج</span>
+                    </button>
+                  )}
+
+                  {/* 5. إلغاء وإغلاق */}
                   <button
                     type="button"
-                    onClick={() => {
-                      onNavigateToScalper(baseAsset);
-                      onClose();
-                    }}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-400 text-right transition cursor-pointer font-bold"
+                    onClick={() => setContextMenu({ visible: false, x: 0, y: 0 })}
+                    className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 mt-1 rounded-xl bg-slate-800/40 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer border border-slate-700/50 font-bold"
                   >
-                    <Zap className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>بيع / فتح بالسكالبينج</span>
+                    <X className="w-3.5 h-3.5" />
+                    <span>إلغاء وإغلاق</span>
                   </button>
-                )}
+                </div>
               </div>
-            </div>
+            </>
           )}
 
           {/* ======================================================================= */}
@@ -1307,6 +1341,18 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                       >
                         <Plus className="w-3.5 h-3.5" />
                       </button>
+
+                      {customLines.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowLinesManager(true)}
+                          className="flex items-center gap-0.5 px-1.5 py-1 rounded-lg bg-rose-600/30 hover:bg-rose-600 border border-rose-500/50 text-rose-300 hover:text-white transition cursor-pointer"
+                          title={`إدارة أو حذف خطوط الشارت (${customLines.length})`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span className="font-mono text-[10px] font-bold">{customLines.length}</span>
+                        </button>
+                      )}
 
                       <button
                         type="button"
@@ -1434,8 +1480,15 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
       {/* 3. MODAL: ADD / EDIT CUSTOM HORIZONTAL LINE                               */}
       {/* ========================================================================= */}
       {isLineEditorOpen && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md" dir="rtl">
-          <div className="w-full max-w-md p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4">
+        <div 
+          className="fixed inset-0 z-[80] flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md cursor-pointer" 
+          dir="rtl"
+          onClick={() => setIsLineEditorOpen(false)}
+        >
+          <div 
+            className="w-full max-w-md p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <span className="font-black text-sm text-cyan-400 flex items-center gap-2">
                 <Sliders className="w-4 h-4" />
@@ -1445,6 +1498,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 type="button"
                 onClick={() => setIsLineEditorOpen(false)}
                 className="text-slate-400 hover:text-white cursor-pointer"
+                title="إغلاق النافذة"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1574,21 +1628,38 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
             </div>
 
             {/* Actions */}
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsLineEditorOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white cursor-pointer"
-              >
-                إلغاء
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveLine}
-                className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs transition cursor-pointer shadow-md"
-              >
-                حفظ الخط على الشارت
-              </button>
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+              {editingLineId ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleDeleteLine(editingLineId);
+                    setIsLineEditorOpen(false);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/40 text-xs font-bold transition cursor-pointer"
+                  title="حذف هذا الخط من الشارت نهائياً"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>حذف هذا الخط</span>
+                </button>
+              ) : <div />}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsLineEditorOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveLine}
+                  className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs transition cursor-pointer shadow-md"
+                >
+                  {editingLineId ? 'حفظ التعديلات' : 'حفظ الخط على الشارت'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1598,8 +1669,15 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
       {/* 4. MODAL: SET EXIT TARGET PRICE ALERT                                     */}
       {/* ========================================================================= */}
       {showExitAlertModal && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md" dir="rtl">
-          <div className="w-full max-w-md p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4">
+        <div 
+          className="fixed inset-0 z-[80] flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md cursor-pointer" 
+          dir="rtl"
+          onClick={() => setShowExitAlertModal(false)}
+        >
+          <div 
+            className="w-full max-w-md p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <span className="font-black text-sm text-pink-400 flex items-center gap-2">
                 <Target className="w-4 h-4" />
@@ -1609,6 +1687,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 type="button"
                 onClick={() => setShowExitAlertModal(false)}
                 className="text-slate-400 hover:text-white cursor-pointer"
+                title="إغلاق النافذة"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1679,7 +1758,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowExitAlertModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white cursor-pointer"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
                 >
                   إغلاق
                 </button>
@@ -1700,6 +1779,118 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                   حفظ وتفعيل التنبيه
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. MODAL: LINES MANAGER & BATCH CLEAR (إدارة وحذف جميع الخطوط)            */}
+      {/* ========================================================================= */}
+      {showLinesManager && (
+        <div 
+          className="fixed inset-0 z-[80] flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md cursor-pointer"
+          dir="rtl"
+          onClick={() => setShowLinesManager(false)}
+        >
+          <div 
+            className="w-full max-w-md p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800 shrink-0">
+              <span className="font-black text-sm text-amber-400 flex items-center gap-2">
+                <Sliders className="w-4 h-4" />
+                <span>إدارة خطوط الشارت المرسومة ({customLines.length})</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowLinesManager(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                title="إغلاق النافذة"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {customLines.length === 0 ? (
+              <div className="py-8 text-center text-slate-400 text-xs">
+                لا توجد خطوط مرسومة حالياً على هذا الشارت.
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto space-y-2 py-1">
+                {customLines.map((line, idx) => (
+                  <div 
+                    key={line.id}
+                    className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-800/80 border border-slate-700/80"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div 
+                        className="w-3.5 h-3.5 rounded-full border border-black/30 shrink-0" 
+                        style={{ backgroundColor: line.color }} 
+                      />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-black text-xs text-white" dir="ltr">
+                            ${trimTrailingZeros(line.price.toString())}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-bold">
+                            #{idx + 1}
+                          </span>
+                        </div>
+                        {line.label && (
+                          <div className="text-[11px] text-slate-300 font-bold">
+                            {line.label}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowLinesManager(false);
+                          handleEditLine(line);
+                        }}
+                        className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs transition cursor-pointer"
+                        title="تعديل هذا الخط"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteLine(line.id)}
+                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 text-xs font-bold transition cursor-pointer"
+                        title="حذف هذا الخط فوراً"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="pt-2 border-t border-slate-800 shrink-0 flex items-center justify-between gap-2">
+              {customLines.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={handleClearAllLines}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/50 text-xs font-black transition cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>حذف كافة الخطوط ({customLines.length})</span>
+                </button>
+              ) : <div />}
+
+              <button
+                type="button"
+                onClick={() => setShowLinesManager(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer"
+              >
+                إغلاق
+              </button>
             </div>
           </div>
         </div>
