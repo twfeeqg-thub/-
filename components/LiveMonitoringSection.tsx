@@ -25,6 +25,7 @@ import { soundAlert, ALERT_TONE_OPTIONS, AlertToneId } from '@/lib/soundAlert';
 import { systemNotification } from '@/lib/systemNotification';
 import { useSystemNotification } from '@/hooks/useSystemNotification';
 import { formatCurrencyPrice } from '@/lib/calculator';
+import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
 
 interface LiveMonitoringSectionProps {
   currencyName: string;
@@ -126,10 +127,8 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
 
     if (isReached) {
       setTargetReached(true);
-      const now = Date.now();
-      // Throttle audio/push alerts to at most once every 10 seconds
-      if (now - lastAlertTimeRef.current > 10000) {
-        lastAlertTimeRef.current = now;
+      if (canTriggerAlert('targetExit', formattedSymbol)) {
+        recordAlertTriggered('targetExit', formattedSymbol);
         if (soundEnabled) {
           soundAlert.playTargetReachedAlert(selectedTone);
         }

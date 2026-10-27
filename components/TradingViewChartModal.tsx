@@ -34,6 +34,7 @@ import { trimTrailingZeros } from '@/lib/calculator';
 import { useTheme } from '@/context/ThemeContext';
 import { systemNotification } from '@/lib/systemNotification';
 import { soundAlert } from '@/lib/soundAlert';
+import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
 
 export interface CustomChartLine {
   id: string;
@@ -225,7 +226,10 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   }>({ visible: false, x: 0, y: 0 });
 
   const [showLinesManager, setShowLinesManager] = useState<boolean>(false);
+  const [chartInteractionMode, setChartInteractionMode] = useState<'draw_gesture' | 'browse_chart'>('draw_gesture');
   const chartOverlayRef = useRef<HTMLDivElement | null>(null);
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
 
   // 1. DYNAMIC IN-CHART LEVEL LINES:
   // Instead of static positions, Entry & Break-Even lines position dynamically relative to Live Price!
@@ -353,18 +357,22 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
 
         if (isTriggered) {
           exitAlertFiredRef.current = true;
-          soundAlert.playTone('celebration');
+          // Verify with unified alert settings (defaults to OFF)
+          if (canTriggerAlert('targetExit', binanceSymbol)) {
+            recordAlertTriggered('targetExit', binanceSymbol);
+            soundAlert.playTone('celebration');
 
-          // Desktop / Mobile Push Notification API
-          systemNotification.sendNotification({
-            title: `🎯 هدف الخروج تحقق: ${binanceSymbol}!`,
-            body: `وصل سعر ${baseAsset} إلى هدف الخروج $${currentPriceNum} (المستهدف: $${exitTarget}).`,
-            tag: `exit-alert-${binanceSymbol}`,
-            icon: '/pwa-192x192.png',
-            badge: '/icon.svg',
-            renotify: true,
-            requireInteraction: true,
-          });
+            // Desktop / Mobile Push Notification API
+            systemNotification.sendNotification({
+              title: `🎯 هدف الخروج تحقق: ${binanceSymbol}!`,
+              body: `وصل سعر ${baseAsset} إلى هدف الخروج $${currentPriceNum} (المستهدف: $${exitTarget}).`,
+              tag: `exit-alert-${binanceSymbol}`,
+              icon: '/pwa-192x192.png',
+              badge: '/icon.svg',
+              renotify: true,
+              requireInteraction: true,
+            });
+          }
 
           setTimeout(() => {
             setExitAlertFired(true);
@@ -387,14 +395,18 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
         if (crossed) {
           customFiredSetRef.current.add(line.id);
           newlyTriggeredIds.push(line.id);
-          soundAlert.playTone('bell');
-          systemNotification.sendNotification({
-            title: `🔔 تنبيه خط الشارت: ${binanceSymbol}!`,
-            body: `وصل السعر إلى خط المستوى ${line.label || ''} عند $${currentPriceNum}.`,
-            tag: `custom-line-${line.id}`,
-            icon: '/pwa-192x192.png',
-            renotify: true,
-          });
+          // Verify with unified alert settings (defaults to OFF)
+          if (canTriggerAlert('chartLines', line.id)) {
+            recordAlertTriggered('chartLines', line.id);
+            soundAlert.playTone('bell');
+            systemNotification.sendNotification({
+              title: `🔔 تنبيه خط الشارت: ${binanceSymbol}!`,
+              body: `وصل السعر إلى خط المستوى ${line.label || ''} عند $${currentPriceNum}.`,
+              tag: `custom-line-${line.id}`,
+              icon: '/pwa-192x192.png',
+              renotify: true,
+            });
+          }
         }
       }
     });
@@ -510,14 +522,9 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   };
 
   // -------------------------------------------------------------
-  // CONTEXT MENU (RIGHT-CLICK ON DESKTOP)
+  // CONTEXT MENU & DELIBERATE LONG PRESS (ضغط مطول 750ms مع إلغاء عند الحركة)
   // -------------------------------------------------------------
-  const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    openContextMenuAt(e.clientX, e.clientY);
-  };
-
-  const openContextMenuAt = (clientX: number, clientY: number) => {
+  const openContextMenuAt = useCallback((clientX: number, clientY: number) => {
     if (!chartOverlayRef.current) return;
     const rect = chartOverlayRef.current.getBoundingClientRect();
     const relY = Math.max(0, Math.min(rect.height, clientY - rect.top));
@@ -530,23 +537,114 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
       estPrice = currentPriceNum ? currentPriceNum * (1 + deltaPercent * 0.02) : estPrice;
     }
 
+    // Clamp positions inside viewport
+    const menuWidth = 240;
+    const menuHeight = 270;
+    const clampedX = Math.max(16, Math.min(clientX - menuWidth / 2, window.innerWidth - menuWidth - 16));
+    const clampedY = Math.max(50, Math.min(clientY - 30, window.innerHeight - menuHeight - 20));
+
     setContextMenu({
       visible: true,
-      x: Math.min(clientX, window.innerWidth - 220),
-      y: Math.min(clientY, window.innerHeight - 250),
+      x: clampedX,
+      y: clampedY,
       estimatedPrice: estPrice,
     });
+  }, [currentPriceNum, entryNum, levelLinePositions]);
+
+  // Context menu on right click (Desktop)
+  const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    openContextMenuAt(e.clientX, e.clientY);
   };
 
-  // Close context menu on outside click
+  // Mobile Touch Long-Press Handlers (deliberate 750ms hold, cancels on movement > 10px)
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length !== 1) {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+      touchStartPosRef.current = null;
+      return;
+    }
+    const touch = e.touches[0];
+    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      try {
+        if (typeof window !== 'undefined' && 'navigator' in window && 'vibrate' in navigator) {
+          navigator.vibrate(40);
+        }
+      } catch {
+        // Ignore
+      }
+      openContextMenuAt(touch.clientX, touch.clientY);
+      longPressTimerRef.current = null;
+    }, 750); // Deliberate long press
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!touchStartPosRef.current) return;
+    const touch = e.touches[0];
+    const dist = Math.hypot(touch.clientX - touchStartPosRef.current.x, touch.clientY - touchStartPosRef.current.y);
+    if (dist > 10) {
+      // Movement > 10px -> user is panning or scrolling, cancel long-press immediately
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    touchStartPosRef.current = null;
+  };
+
+  // Desktop Mouse Long-Press Handlers
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return; // Left click only
+    touchStartPosRef.current = { x: e.clientX, y: e.clientY };
+
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      openContextMenuAt(e.clientX, e.clientY);
+      longPressTimerRef.current = null;
+    }, 750);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!touchStartPosRef.current) return;
+    const dist = Math.hypot(e.clientX - touchStartPosRef.current.x, e.clientY - touchStartPosRef.current.y);
+    if (dist > 10) {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    touchStartPosRef.current = null;
+  };
+
+  // Close context menu on outside click or escape
   useEffect(() => {
-    const handleWindowClick = () => {
-      if (contextMenu.visible) {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && contextMenu.visible) {
         setContextMenu((prev) => ({ ...prev, visible: false }));
       }
     };
-    window.addEventListener('click', handleWindowClick);
-    return () => window.removeEventListener('click', handleWindowClick);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [contextMenu.visible]);
 
   // -------------------------------------------------------------
@@ -1029,6 +1127,36 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
           onContextMenu={handleContextMenu}
           className={`relative flex-1 w-full h-full min-h-[350px] ${isDark ? 'bg-slate-950' : 'bg-white'}`}
         >
+          {/* Top Left Floating Switch: Long-Press Draw Mode vs Native TradingView Candle Mode */}
+          <div className="absolute top-2 left-2 z-35 flex items-center gap-1 p-1 rounded-xl bg-slate-900/85 backdrop-blur-md border border-slate-700/80 shadow-lg text-[11px] font-bold select-none">
+            <button
+              type="button"
+              onClick={() => setChartInteractionMode('draw_gesture')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                chartInteractionMode === 'draw_gesture'
+                  ? 'bg-cyan-500 text-slate-950 shadow-xs font-black'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+              title="تفعيل وضع الضغط المطول (Long Press) لرسم الخطوط وإدارتها باللمس"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>رسم بالضغط المطول ✍️</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartInteractionMode('browse_chart')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                chartInteractionMode === 'browse_chart'
+                  ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+              title="تصفح شموع ومؤشرات TradingView بحرية تامة دون اعتراض اللمس"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>تصفح الشموع 📊</span>
+            </button>
+          </div>
+
           <iframe
             key={`${binanceSymbol}-${chartTheme}`}
             src={iframeSrc}
@@ -1037,6 +1165,21 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
             allow="fullscreen; clipboard-write"
             loading="lazy"
           />
+
+          {/* DELIBERATE LONG-PRESS GESTURE LAYER (يعمل بالضغط المطول 750ms فقط ويُلغى فوراً عند التحريك) */}
+          {chartInteractionMode === 'draw_gesture' && (
+            <div 
+              className="absolute inset-0 z-20 cursor-crosshair select-none touch-none"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchEnd}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+            />
+          )}
 
           {/* ======================================================================= */}
           {/* DYNAMIC IN-CHART LEVEL LINES (تحرك مباشر وتلقائي مع السعر والبيانات)   */}
@@ -1105,7 +1248,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 </div>
               )}
 
-              {/* 4. CUSTOM DRAWN LINES (الخطوط الأفقية المخصصة المرسومة) */}
+              {/* 4. CUSTOM DRAWN LINES (الضغط مرة واحدة يفتح نافذة التخصيص والإعدادات والحذف فوراً) */}
               {customLines.map((line) => {
                 const topPct = levelLinePositions.calcTop(line.price);
                 const isDashed = line.style === 'dashed';
@@ -1113,12 +1256,17 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 return (
                   <div 
                     key={line.id}
-                    className="absolute left-0 right-0 flex items-center transition-all duration-300 pointer-events-auto group"
+                    className="absolute left-0 right-0 flex items-center transition-all duration-300 pointer-events-auto group cursor-pointer py-3 -my-3"
                     style={{ top: `${topPct}%` }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditLine(line);
+                    }}
+                    title="انقر مرة واحدة لتخصيص إعدادات هذا الخط ولونه وحجمه ونصه أو حذفه"
                   >
                     {/* Line Stroke with Custom Style & Thickness */}
                     <div 
-                      className="flex-1 transition-all"
+                      className="flex-1 transition-all group-hover:brightness-125"
                       style={{
                         borderTopWidth: `${line.thickness}px`,
                         borderTopStyle: isDashed ? 'dashed' : isDotted ? 'dotted' : 'solid',
@@ -1130,7 +1278,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                     {/* Annotation Label over the line (if present) */}
                     {line.label && (
                       <div 
-                        className="absolute right-40 -top-5 px-2 py-0.5 rounded-md font-bold shadow-md select-none border border-black/20"
+                        className="absolute right-40 -top-5 px-2.5 py-0.5 rounded-md font-bold shadow-md select-none border border-black/20 group-hover:scale-105 transition"
                         style={{
                           backgroundColor: line.color,
                           color: line.textColor || '#ffffff',
@@ -1167,14 +1315,17 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                         className="p-1 rounded-md bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-600 cursor-pointer transition"
                         title="تعديل هذا الخط"
                       >
-                        <Edit2 className="w-3 h-3" />
+                        <Sliders className="w-3 h-3 text-cyan-400" />
                       </button>
 
                       {/* Right Price Badge */}
                       <div 
                         className="flex items-center gap-1 px-2 py-0.5 rounded-l-md font-mono font-black text-xs text-white shadow-lg border border-white/30 cursor-pointer hover:brightness-110 transition"
                         style={{ backgroundColor: line.color }}
-                        onClick={() => handleEditLine(line)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditLine(line);
+                        }}
                         title="انقر لتعديل هذا الخط"
                       >
                         {line.hasAlert && <BellRing className="w-3 h-3 text-amber-300" />}
@@ -1188,52 +1339,57 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
           )}
 
           {/* ======================================================================= */}
-          {/* CONTEXT MENU ON RIGHT-CLICK (قائمة منبثقة تفاعلية مع إغلاق سهل)           */}
+          {/* CONTEXT MENU ON LONG-PRESS OR RIGHT-CLICK (مع زر X وإغلاق عند اللمس بالخارج) */}
           {/* ======================================================================= */}
           {contextMenu.visible && (
             <>
               {/* Invisible backdrop for instant dismissal by tapping anywhere outside */}
               <div 
-                className="fixed inset-0 z-45 bg-black/30 backdrop-blur-[1px] cursor-pointer"
+                className="fixed inset-0 z-[85] bg-black/50 backdrop-blur-xs cursor-pointer animate-in fade-in duration-150"
                 onClick={() => setContextMenu({ visible: false, x: 0, y: 0 })}
+                onTouchStart={() => setContextMenu({ visible: false, x: 0, y: 0 })}
               />
 
               <div 
-                className={`fixed z-50 min-w-[220px] p-2 rounded-2xl border shadow-2xl backdrop-blur-xl animate-fadeIn ${
+                className={`fixed z-[90] w-64 p-3 rounded-2xl border shadow-2xl backdrop-blur-xl animate-in zoom-in-95 duration-150 ${
                   isDark ? 'bg-slate-900/95 border-slate-700 text-white shadow-black/80' : 'bg-white/95 border-slate-300 text-slate-950 shadow-slate-400/50'
                 }`}
                 style={{ left: contextMenu.x, top: contextMenu.y }}
                 dir="rtl"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center justify-between">
-                  <span>خيارات الشارت السريعة:</span>
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-1.5">
+                    <Sliders className="w-4 h-4 text-cyan-400" />
+                    <span className="text-xs font-black">خيارات الشارت السريعة</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
                     {contextMenu.estimatedPrice && (
-                      <span className="font-mono font-black text-amber-500" dir="ltr">
+                      <span className="font-mono font-black text-xs text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-md" dir="ltr">
                         ${contextMenu.estimatedPrice.toFixed(2)}
                       </span>
                     )}
+                    {/* Clear 'X' Close Button */}
                     <button
                       type="button"
                       onClick={() => setContextMenu({ visible: false, x: 0, y: 0 })}
-                      className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                      className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
                       title="إغلاق القائمة"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
 
-                <div className="space-y-1 pt-1.5 text-xs">
-                  {/* 1. رسم خط أفقي هنا */}
+                <div className="space-y-1 text-xs">
+                  {/* 1. رسم وتخصيص خط أفقي هنا */}
                   <button
                     type="button"
                     onClick={() => handleOpenAddLine(contextMenu.estimatedPrice)}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-cyan-500/15 hover:text-cyan-600 dark:hover:text-cyan-400 text-right transition cursor-pointer font-bold"
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl bg-cyan-600/15 hover:bg-cyan-600 text-cyan-500 hover:text-white text-right transition cursor-pointer font-bold border border-cyan-500/30"
                   >
-                    <Plus className="w-3.5 h-3.5 text-cyan-500" />
-                    <span>رسم خط أفقي هنا</span>
+                    <Plus className="w-4 h-4" />
+                    <span>رسم وتخصيص خط أفقي هنا</span>
                   </button>
 
                   {/* 2. تعيين هدف خروج وتنبيه */}
@@ -1246,13 +1402,28 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                       setShowExitAlertModal(true);
                       setContextMenu({ visible: false, x: 0, y: 0 });
                     }}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-pink-500/15 hover:text-pink-600 dark:hover:text-pink-400 text-right transition cursor-pointer font-bold"
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl bg-pink-600/15 hover:bg-pink-600 text-pink-500 hover:text-white text-right transition cursor-pointer font-bold border border-pink-500/30"
                   >
-                    <Target className="w-3.5 h-3.5 text-pink-500" />
+                    <Target className="w-4 h-4" />
                     <span>تعيين هدف خروج وتنبيه</span>
                   </button>
 
-                  {/* 3. فتح في الحاسبة كسعر دخول */}
+                  {/* 3. إدارة الخطوط إذا كانت موجودة */}
+                  {customLines.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLinesManager(true);
+                        setContextMenu({ visible: false, x: 0, y: 0 });
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-800 text-slate-300 text-right transition cursor-pointer font-bold"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                      <span>إدارة وحذف الخطوط ({customLines.length})</span>
+                    </button>
+                  )}
+
+                  {/* 4. فتح في الحاسبة كسعر دخول */}
                   {onNavigateToCalculator && (
                     <button
                       type="button"
@@ -1260,14 +1431,14 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                         onNavigateToCalculator(baseAsset, contextMenu.estimatedPrice?.toFixed(2));
                         onClose();
                       }}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-amber-500/15 hover:text-amber-600 dark:hover:text-amber-400 text-right transition cursor-pointer font-bold"
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-amber-500/15 text-slate-300 hover:text-amber-400 text-right transition cursor-pointer font-bold"
                     >
                       <Calculator className="w-3.5 h-3.5 text-amber-500" />
                       <span>شراء / فتح بالحاسبة</span>
                     </button>
                   )}
 
-                  {/* 4. فتح في لوحة السكالبينج */}
+                  {/* 5. فتح في لوحة السكالبينج */}
                   {onNavigateToScalper && (
                     <button
                       type="button"
@@ -1275,18 +1446,18 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                         onNavigateToScalper(baseAsset);
                         onClose();
                       }}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-400 text-right transition cursor-pointer font-bold"
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-emerald-500/15 text-slate-300 hover:text-emerald-400 text-right transition cursor-pointer font-bold"
                     >
                       <Zap className="w-3.5 h-3.5 text-emerald-500" />
                       <span>بيع / فتح بالسكالبينج</span>
                     </button>
                   )}
 
-                  {/* 5. إلغاء وإغلاق */}
+                  {/* 6. إلغاء وإغلاق */}
                   <button
                     type="button"
                     onClick={() => setContextMenu({ visible: false, x: 0, y: 0 })}
-                    className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 mt-1 rounded-xl bg-slate-800/40 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer border border-slate-700/50 font-bold"
+                    className="w-full flex items-center justify-center gap-1 py-1.5 mt-1 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer font-bold text-[11px]"
                   >
                     <X className="w-3.5 h-3.5" />
                     <span>إلغاء وإغلاق</span>
@@ -1581,7 +1752,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               </div>
             </div>
 
-            {/* Annotation Label Text & Size */}
+            {/* Annotation Label Text, Color & Size */}
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-300 block">
                 نص توضيحي فوق الخط (اختياري):
@@ -1594,7 +1765,41 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:border-cyan-500"
               />
 
-              <div className="flex items-center justify-between gap-3 text-xs">
+              {/* Text Color Selection */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 block mb-1">
+                  لون النص:
+                </label>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { label: 'أبيض', value: '#ffffff' },
+                    { label: 'ذهبي', value: '#fbbf24' },
+                    { label: 'سماوي', value: '#22d3ee' },
+                    { label: 'أخضر', value: '#34d399' },
+                    { label: 'وردي', value: '#f43f5e' },
+                    { label: 'بنفسجي', value: '#a78bfa' },
+                    { label: 'برتقالي', value: '#fb923c' },
+                    { label: 'رمادي', value: '#94a3b8' },
+                  ].map((tc) => (
+                    <button
+                      key={tc.value}
+                      type="button"
+                      onClick={() => setLineEditorTextColor(tc.value)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer flex items-center gap-1 ${
+                        lineEditorTextColor === tc.value
+                          ? 'border-white bg-slate-700 ring-1 ring-white/50 text-white shadow-xs'
+                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: tc.value }} />
+                      <span>{tc.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Text Size Selection */}
+              <div className="flex items-center justify-between gap-3 text-xs pt-1">
                 <span className="text-slate-400 font-bold">حجم النص:</span>
                 <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl">
                   {(['sm', 'base', 'lg'] as const).map((sz) => (

@@ -28,6 +28,7 @@ import {
   Palette
 } from 'lucide-react';
 import { soundAlert } from '@/lib/soundAlert';
+import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
 
 interface ScalperDashboardProps {
   trades: ScalpTrade[];
@@ -127,14 +128,20 @@ export const ScalperDashboard: React.FC<ScalperDashboardProps> = ({
   const handleQuickBuy = (trade: ScalpTrade, amountUsdt: number) => {
     const p = livePrices[trade.binanceSymbol] || trade.dipPrice || '0';
     onOpenTrade(trade.id, p, amountUsdt.toString());
-    soundAlert.playBounceAlert();
+    if (canTriggerAlert('reboundBounce', trade.id)) {
+      recordAlertTriggered('reboundBounce', trade.id);
+      soundAlert.playBounceAlert();
+    }
   };
 
   // Quick exit action from card
   const handleQuickExit = (trade: ScalpTrade) => {
     const p = livePrices[trade.binanceSymbol] || trade.entryPrice || '0';
     onCloseTradeToUsdt(trade.id, p, 'manual_usdt');
-    soundAlert.playTradeSuccess();
+    if (canTriggerAlert('targetExit', trade.id)) {
+      recordAlertTriggered('targetExit', trade.id);
+      soundAlert.playTradeSuccess();
+    }
   };
 
   // Reset Session Stats

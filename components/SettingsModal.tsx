@@ -1,10 +1,41 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Check, Trash2, SlidersHorizontal, Info, Palette, Sun, Moon, Laptop, Bell, BellOff, Smartphone, Send } from 'lucide-react';
+import { 
+  X, 
+  Check, 
+  Trash2, 
+  SlidersHorizontal, 
+  Info, 
+  Palette, 
+  Sun, 
+  Moon, 
+  Laptop, 
+  Bell, 
+  BellOff, 
+  Smartphone, 
+  Send,
+  TrendingDown,
+  Zap,
+  Target,
+  Sliders,
+  AlertTriangle,
+  ShieldAlert,
+  Repeat,
+  Clock,
+  ChevronDown,
+  ChevronUp
+} from 'lucide-react';
 import { FeeCalculationMethod, ThemeMode, AccentColor } from '@/types/currency';
 import { useTheme } from '@/context/ThemeContext';
 import { useSystemNotification } from '@/hooks/useSystemNotification';
+import { 
+  getAlertSettings, 
+  saveAlertSettings, 
+  DEFAULT_ALERT_SETTINGS, 
+  AppAlertSettings, 
+  AlertTypeId 
+} from '@/lib/alertSettings';
 
 export interface DefaultFeeSettings {
   entryFeePercent: string;
@@ -42,13 +73,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     ...currentSettings,
     feeMethod: currentSettings.feeMethod || 'cumulative'
   });
+  const [alertConfigs, setAlertConfigs] = useState<AppAlertSettings>(() => getAlertSettings());
+  const [expandedAlertId, setExpandedAlertId] = useState<AlertTypeId | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   if (!isOpen) return null;
 
+  const handleToggleAlert = (id: AlertTypeId) => {
+    setAlertConfigs((prev) => {
+      const nextEnabled = !prev[id].enabled;
+      return {
+        ...prev,
+        [id]: {
+          ...prev[id],
+          enabled: nextEnabled,
+        },
+      };
+    });
+    // Automatically expand the card when enabled so user can configure repeat/interval
+    if (!alertConfigs[id].enabled) {
+      setExpandedAlertId(id);
+    }
+  };
+
+  const handleRepeatModeChange = (id: AlertTypeId, mode: 'once' | 'continuous') => {
+    setAlertConfigs((prev) => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        repeatMode: mode,
+      },
+    }));
+  };
+
+  const handleIntervalChange = (id: AlertTypeId, seconds: number) => {
+    setAlertConfigs((prev) => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        intervalSeconds: seconds,
+      },
+    }));
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     onSaveDefaults(form);
+    saveAlertSettings(alertConfigs);
     setSavedSuccess(true);
     setTimeout(() => {
       setSavedSuccess(false);
@@ -65,6 +136,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       exitFeeFixed: '',
       feeMethod: 'cumulative',
     });
+    setAlertConfigs(DEFAULT_ALERT_SETTINGS);
+    saveAlertSettings(DEFAULT_ALERT_SETTINGS);
   };
 
   const accentOptions: { key: AccentColor; name: string; bgClass: string; borderClass: string }[] = [
@@ -351,6 +424,176 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span>{isNotifTesting ? 'جاري إرسال الإشعار التجريبي...' : 'إرسال إشعار تجريبي لاختبار الخلفية 🚀'}</span>
                 </button>
               )}
+            </div>
+          </div>
+
+          {/* ========================================================================= */}
+          {/* قسم إدارة التنبيهات المخصص (Alerts Control Center - الوضع الافتراضي مغلق) */}
+          {/* ========================================================================= */}
+          <div className="space-y-3 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-200/60 dark:border-slate-700/60">
+              <div className="flex items-center gap-1.5">
+                <Bell className="w-4 h-4 text-amber-500" />
+                <h3 className="text-xs font-black text-slate-900 dark:text-slate-100">
+                  تخصيص التنبيهات الفردية
+                </h3>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                مغلقة افتراضياً
+              </span>
+            </div>
+
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+              يمكنك هنا تفعيل أو تعطيل كل تنبيه بشكل مستقل، وتحديد وضع التكرار (مرة واحدة أو باستمرار) مع ضبط الفاصل الزمني للتكرار.
+            </p>
+
+            <div className="space-y-2.5">
+              {(Object.keys(alertConfigs) as AlertTypeId[]).map((typeId) => {
+                const cfg = alertConfigs[typeId];
+                const isExpanded = expandedAlertId === typeId || cfg.enabled;
+
+                const getIcon = () => {
+                  switch (typeId) {
+                    case 'bottomDetection':
+                      return <TrendingDown className="w-4 h-4 text-amber-500 shrink-0" />;
+                    case 'reboundBounce':
+                      return <Zap className="w-4 h-4 text-emerald-500 shrink-0" />;
+                    case 'targetExit':
+                      return <Target className="w-4 h-4 text-pink-500 shrink-0" />;
+                    case 'chartLines':
+                      return <Sliders className="w-4 h-4 text-cyan-500 shrink-0" />;
+                    case 'trailingPeak':
+                      return <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />;
+                    case 'breakEvenStop':
+                      return <ShieldAlert className="w-4 h-4 text-violet-500 shrink-0" />;
+                    default:
+                      return <Bell className="w-4 h-4 text-amber-500 shrink-0" />;
+                  }
+                };
+
+                return (
+                  <div
+                    key={typeId}
+                    className={`rounded-xl border transition-all duration-200 overflow-hidden ${
+                      cfg.enabled
+                        ? 'bg-white dark:bg-slate-900/90 border-amber-500/40 shadow-xs'
+                        : 'bg-white/60 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-85'
+                    }`}
+                  >
+                    {/* Header Row: Icon, Title & Toggle Switch */}
+                    <div className="p-2.5 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {getIcon()}
+                        <div className="min-w-0">
+                          <span className="font-bold text-xs text-slate-800 dark:text-slate-200 block truncate">
+                            {cfg.name}
+                          </span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 block truncate">
+                            {cfg.description}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Interactive Toggle Switch */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleAlert(typeId)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                          cfg.enabled ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
+                        }`}
+                        title={cfg.enabled ? 'إيقاف هذا التنبيه' : 'تفعيل هذا التنبيه'}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                            cfg.enabled ? '-translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Expandable Configuration Panel when Enabled */}
+                    {cfg.enabled && (
+                      <div className="p-2.5 pt-0 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/30 space-y-2 mt-1">
+                        {/* Repeat Mode Choice: Once vs Continuous */}
+                        <div className="space-y-1 pt-1.5">
+                          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                            <Repeat className="w-3 h-3 text-amber-500" />
+                            <span>تكرار التنبيه:</span>
+                          </span>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleRepeatModeChange(typeId, 'once')}
+                              className={`py-1 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer border ${
+                                cfg.repeatMode === 'once'
+                                  ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-xs'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                              }`}
+                            >
+                              <span>مرة واحدة فقط</span>
+                              {cfg.repeatMode === 'once' && <Check className="w-3 h-3 stroke-[2.5]" />}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRepeatModeChange(typeId, 'continuous')}
+                              className={`py-1 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer border ${
+                                cfg.repeatMode === 'continuous'
+                                  ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-xs'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                              }`}
+                            >
+                              <span>تكرار مستمر</span>
+                              {cfg.repeatMode === 'continuous' && <Check className="w-3 h-3 stroke-[2.5]" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Interval Selector if Continuous */}
+                        {cfg.repeatMode === 'continuous' && (
+                          <div className="space-y-1 pt-1 animate-in fade-in duration-150">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-amber-500" />
+                                <span>الفاصل الزمني للتكرار:</span>
+                              </span>
+                              <span className="text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400">
+                                {cfg.intervalSeconds < 60
+                                  ? `كل ${cfg.intervalSeconds} ثانية`
+                                  : `كل ${Math.round(cfg.intervalSeconds / 60)} دقيقة`}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-6 gap-1">
+                              {[
+                                { sec: 15, label: '15ث' },
+                                { sec: 30, label: '30ث' },
+                                { sec: 60, label: '1د' },
+                                { sec: 180, label: '3د' },
+                                { sec: 300, label: '5د' },
+                                { sec: 600, label: '10د' },
+                              ].map(({ sec, label }) => (
+                                <button
+                                  key={sec}
+                                  type="button"
+                                  onClick={() => handleIntervalChange(typeId, sec)}
+                                  className={`py-1 rounded-lg text-[10px] font-mono font-bold transition border cursor-pointer ${
+                                    cfg.intervalSeconds === sec
+                                      ? 'bg-amber-500/20 border-amber-500 text-amber-600 dark:text-amber-300'
+                                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-400'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
