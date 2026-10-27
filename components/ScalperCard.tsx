@@ -16,7 +16,11 @@ import {
   DollarSign, 
   AlertCircle,
   ExternalLink,
-  Calculator
+  Calculator,
+  Power,
+  Bell,
+  BellOff,
+  X
 } from 'lucide-react';
 import { trimTrailingZeros } from '@/lib/calculator';
 
@@ -27,6 +31,9 @@ interface ScalperCardProps {
   onQuickBuy: (trade: ScalpTrade, amountUsdt: number, coinQuantity?: string) => void;
   onQuickExit: (trade: ScalpTrade) => void;
   onNavigateToCalculator: (trade: ScalpTrade) => void;
+  onDeleteTrade: (tradeId: string) => void;
+  onToggleActive: (tradeId: string) => void;
+  onToggleAlerts: (tradeId: string) => void;
 }
 
 export const ScalperCard: React.FC<ScalperCardProps> = ({
@@ -36,6 +43,9 @@ export const ScalperCard: React.FC<ScalperCardProps> = ({
   onQuickBuy,
   onQuickExit,
   onNavigateToCalculator,
+  onDeleteTrade,
+  onToggleActive,
+  onToggleAlerts,
 }) => {
   const [isCalcOpen, setIsCalcOpen] = useState(false);
   const currentTime = useCurrentTimestamp();
@@ -96,7 +106,9 @@ export const ScalperCard: React.FC<ScalperCardProps> = ({
     <div 
       onClick={() => onOpenDetail(trade)}
       className={`group relative rounded-2xl border p-4 sm:p-5 transition-all duration-200 cursor-pointer shadow-xs hover:shadow-md ${
-        trade.status === 'in_trade'
+        trade.isActive === false
+          ? 'bg-slate-100/40 dark:bg-slate-900/40 border-slate-300/60 dark:border-slate-800/60 opacity-60'
+          : trade.status === 'in_trade'
           ? (inTradeMetrics && inTradeMetrics.pnlPercent >= 0 
               ? 'bg-emerald-950/20 border-emerald-500/40 hover:border-emerald-500' 
               : 'bg-rose-950/20 border-rose-500/40 hover:border-rose-500')
@@ -132,38 +144,91 @@ export const ScalperCard: React.FC<ScalperCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* Status Indicator */}
-          {trade.status === 'in_trade' && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              صفقة مفتوحة
+          {trade.isActive === false ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-200 dark:bg-slate-800 text-slate-500 border border-slate-300 dark:border-slate-700">
+              متوقفة
             </span>
-          )}
-          {trade.status === 'watching' && (
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+          ) : trade.status === 'in_trade' ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              مفتوحة
+            </span>
+          ) : trade.status === 'watching' ? (
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
               dipMetrics?.isBounceConfirmed
                 ? 'bg-amber-500/20 text-amber-500 dark:text-amber-300 border-amber-500/40 animate-pulse'
                 : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
             }`}>
-              {dipMetrics?.isBounceConfirmed ? '🚀 ارتداد مؤكد' : '🎯 رصد القاع'}
+              {dipMetrics?.isBounceConfirmed ? '🚀 ارتداد' : '🎯 رصد'}
             </span>
-          )}
-          {trade.status === 'closed' && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
               <CheckCircle2 className="w-3 h-3" />
               مغلقة
             </span>
           )}
 
-          {/* Expand Icon Button */}
+          {/* 1. زر تفعيل / غلق الصفقة */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleActive(trade.id);
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-bold border transition cursor-pointer ${
+              trade.isActive !== false
+                ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25'
+                : 'bg-slate-200 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+            }`}
+            title={trade.isActive !== false ? 'الصفقة مفعّلة — انقر للإيقاف المؤقت' : 'الصفقة متوقفة — انقر للتفعيل'}
+          >
+            <Power className="w-3 h-3" />
+            <span>{trade.isActive !== false ? 'تفعيل' : 'غلق'}</span>
+          </button>
+
+          {/* 2. زر تفعيل / غلق التنبيهات (مضبوط افتراضياً على وضع "مغلق") */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleAlerts(trade.id);
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-bold border transition cursor-pointer ${
+              trade.alertsEnabled
+                ? 'bg-amber-500/20 border-amber-500/40 text-amber-600 dark:text-amber-300 hover:bg-amber-500/30'
+                : 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+            }`}
+            title={trade.alertsEnabled ? 'التنبيهات مشغلة لهذه الصفقة — انقر للغلق' : 'التنبيهات مغلقة لهذه الصفقة (افتراضي) — انقر للتفعيل'}
+          >
+            {trade.alertsEnabled ? <Bell className="w-3 h-3 text-amber-500" /> : <BellOff className="w-3 h-3" />}
+            <span>{trade.alertsEnabled ? 'تنبيه' : 'صامت'}</span>
+          </button>
+
+          {/* 3. زر حذف الصفقة "X" */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm(`هل تريد حذف صفقة ${trade.name} من لوحة السكالبينج؟`)) {
+                onDeleteTrade(trade.id);
+              }
+            }}
+            className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/15 border border-transparent hover:border-rose-500/30 transition cursor-pointer"
+            title="حذف هذه الصفقة من القائمة (X)"
+          >
+            <X className="w-4 h-4 stroke-[2.5]" />
+          </button>
+
+          {/* 4. زر تفاصيل الصفقة */}
           <button 
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               onOpenDetail(trade);
             }}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition"
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition cursor-pointer"
             title="فتح التفاصيل الموسعة"
           >
             <Maximize2 className="w-4 h-4" />

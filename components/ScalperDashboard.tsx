@@ -25,7 +25,8 @@ import {
   Sparkles,
   Volume2,
   VolumeX,
-  Palette
+  Palette,
+  Trash2
 } from 'lucide-react';
 import { soundAlert } from '@/lib/soundAlert';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
@@ -42,6 +43,9 @@ interface ScalperDashboardProps {
   onAddTrade: (name: string) => void;
   onUpdateTrade: (trade: ScalpTrade) => void;
   onDeleteTrade: (tradeId: string) => void;
+  onToggleActive?: (tradeId: string) => void;
+  onToggleAlerts?: (tradeId: string) => void;
+  onClearAllTrades?: () => void;
   onOpenTrade: (tradeId: string, entryPrice: string, amountUsdt: string, coinQuantity?: string) => void;
   onCloseTradeToUsdt: (tradeId: string, exitPrice: string, reason: ScalpTrade['exitReason']) => void;
   onNavigateToCalculator: (trade?: ScalpTrade) => void;
@@ -63,6 +67,9 @@ export const ScalperDashboard: React.FC<ScalperDashboardProps> = ({
   onAddTrade,
   onUpdateTrade,
   onDeleteTrade,
+  onToggleActive,
+  onToggleAlerts,
+  onClearAllTrades,
   onOpenTrade,
   onCloseTradeToUsdt,
   onNavigateToCalculator,
@@ -241,6 +248,23 @@ export const ScalperDashboard: React.FC<ScalperDashboardProps> = ({
             <Radio className={`w-3.5 h-3.5 ${isLiveStreamActive ? 'animate-pulse text-emerald-500' : ''}`} />
             <span>{isLiveStreamActive ? 'بث بينانس متصل' : 'البث متوقف'}</span>
           </button>
+
+          {/* Clear All Trades Action */}
+          {trades.length > 0 && onClearAllTrades && (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`هل أنت متأكد من حذف جميع الصفقات والعملات (${trades.length}) من لوحة السكالبينج؟`)) {
+                  onClearAllTrades();
+                }
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 transition cursor-pointer"
+              title="حذف جميع الصفقات لتنظيف شاشة السكالبينج"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>مسح الكل ({trades.length})</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -454,6 +478,9 @@ export const ScalperDashboard: React.FC<ScalperDashboardProps> = ({
               onQuickBuy={handleQuickBuy}
               onQuickExit={handleQuickExit}
               onNavigateToCalculator={onNavigateToCalculator}
+              onDeleteTrade={onDeleteTrade}
+              onToggleActive={onToggleActive || (() => {})}
+              onToggleAlerts={onToggleAlerts || (() => {})}
             />
           ))}
         </div>

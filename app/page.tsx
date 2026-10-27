@@ -52,6 +52,7 @@ import {
   DEFAULT_WATCHLIST_ITEMS 
 } from '@/types/watchlist';
 import { systemNotification } from '@/lib/systemNotification';
+import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
 import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList } from 'lucide-react';
 
 export default function CalculatorPage() {
@@ -142,102 +143,24 @@ export default function CalculatorPage() {
           }
         }
 
-        // Load scalper trades
+        // Load scalper trades (فارغة تماماً افتراضياً وبدون أي صفقات أولية مسبقة)
         const savedScalper = localStorage.getItem(STORAGE_KEY_SCALPER_TRADES);
         if (savedScalper) {
-          const parsed: ScalpTrade[] = JSON.parse(savedScalper);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setScalpTrades(parsed);
-          } else {
-            // Seed initial volatile coins for bottom hunting
-            const initialSeeds: ScalpTrade[] = [
-              {
-                id: 'scalp_init_sol',
-                name: 'SOL',
-                binanceSymbol: 'SOLUSDT',
-                status: 'watching',
-                bounceTriggerPercent: 0.4,
-                trailingDropAlertPercent: 0.35,
-                target1Percent: 0.6,
-                target2Percent: 1.2,
-                target3Percent: 2.0,
-                createdAt: Date.now(),
-                notes: 'عملة سيولة عالية ممتازة للسكالبينج السريع',
-              },
-              {
-                id: 'scalp_init_doge',
-                name: 'DOGE',
-                binanceSymbol: 'DOGEUSDT',
-                status: 'watching',
-                bounceTriggerPercent: 0.5,
-                trailingDropAlertPercent: 0.4,
-                target1Percent: 0.6,
-                target2Percent: 1.2,
-                target3Percent: 2.0,
-                createdAt: Date.now() - 1000,
-                notes: 'تذبذب سريع ملائم للارتداد من القيعان',
-              },
-              {
-                id: 'scalp_init_pepe',
-                name: 'PEPE',
-                binanceSymbol: 'PEPEUSDT',
-                status: 'watching',
-                bounceTriggerPercent: 0.6,
-                trailingDropAlertPercent: 0.5,
-                target1Percent: 0.7,
-                target2Percent: 1.5,
-                target3Percent: 2.5,
-                createdAt: Date.now() - 2000,
-                notes: 'ارتدادات قوية خلال دقائق معدودة',
-              },
-            ];
-            setScalpTrades(initialSeeds);
-            localStorage.setItem(STORAGE_KEY_SCALPER_TRADES, JSON.stringify(initialSeeds));
+          try {
+            const parsed: ScalpTrade[] = JSON.parse(savedScalper);
+            if (Array.isArray(parsed)) {
+              // مسح أي صفقات تجريبية قديمة بدأت بـ scalp_init_
+              const userAddedTrades = parsed.filter((t) => !t.id.startsWith('scalp_init_'));
+              setScalpTrades(userAddedTrades);
+              localStorage.setItem(STORAGE_KEY_SCALPER_TRADES, JSON.stringify(userAddedTrades));
+            } else {
+              setScalpTrades([]);
+            }
+          } catch {
+            setScalpTrades([]);
           }
         } else {
-          const initialSeeds: ScalpTrade[] = [
-            {
-              id: 'scalp_init_sol',
-              name: 'SOL',
-              binanceSymbol: 'SOLUSDT',
-              status: 'watching',
-              bounceTriggerPercent: 0.4,
-              trailingDropAlertPercent: 0.35,
-              target1Percent: 0.6,
-              target2Percent: 1.2,
-              target3Percent: 2.0,
-              createdAt: Date.now(),
-              notes: 'عملة سيولة عالية ممتازة للسكالبينج السريع',
-            },
-            {
-              id: 'scalp_init_doge',
-              name: 'DOGE',
-              binanceSymbol: 'DOGEUSDT',
-              status: 'watching',
-              bounceTriggerPercent: 0.5,
-              trailingDropAlertPercent: 0.4,
-              target1Percent: 0.6,
-              target2Percent: 1.2,
-              target3Percent: 2.0,
-              createdAt: Date.now() - 1000,
-              notes: 'تذبذب سريع ملائم للارتداد من القيعان',
-            },
-            {
-              id: 'scalp_init_pepe',
-              name: 'PEPE',
-              binanceSymbol: 'PEPEUSDT',
-              status: 'watching',
-              bounceTriggerPercent: 0.6,
-              trailingDropAlertPercent: 0.5,
-              target1Percent: 0.7,
-              target2Percent: 1.5,
-              target3Percent: 2.5,
-              createdAt: Date.now() - 2000,
-              notes: 'ارتدادات قوية خلال دقائق معدودة',
-            },
-          ];
-          setScalpTrades(initialSeeds);
-          localStorage.setItem(STORAGE_KEY_SCALPER_TRADES, JSON.stringify(initialSeeds));
+          setScalpTrades([]);
         }
 
         // Load scalper session stats
@@ -912,18 +835,21 @@ export default function CalculatorPage() {
                         };
                       }
 
-                      // Check for confirmed bounce above dip
-                      if (currentDip > 0) {
+                      // Check for confirmed bounce above dip (فقط إذا كانت الصفقة مفعّلة والتنبيهات مشغلة لها)
+                      if (currentDip > 0 && st.isActive !== false && st.alertsEnabled === true) {
                         const bouncePercent = ((priceNum - currentDip) / currentDip) * 100;
                         if (bouncePercent >= (st.bounceTriggerPercent || 0.4)) {
-                          systemNotification.sendNotification({
-                            title: `⚡ ارتداد جاهز للشراء (${st.name})!`,
-                            body: `ارتد سعر ${st.name} بنسبة +${bouncePercent.toFixed(2)}% فوق القاع (${currentDip} USDT). جاهز لسكالبينج سريع!`,
-                            tag: `bounce-${st.id}`,
-                            icon: '/pwa-192x192.png',
-                            badge: '/icon.svg',
-                            renotify: true,
-                          });
+                          if (canTriggerAlert('reboundBounce', st.id)) {
+                            recordAlertTriggered('reboundBounce', st.id);
+                            systemNotification.sendNotification({
+                              title: `⚡ ارتداد جاهز للشراء (${st.name})!`,
+                              body: `ارتد سعر ${st.name} بنسبة +${bouncePercent.toFixed(2)}% فوق القاع (${currentDip} USDT). جاهز لسكالبينج سريع!`,
+                              tag: `bounce-${st.id}`,
+                              icon: '/pwa-192x192.png',
+                              badge: '/icon.svg',
+                              renotify: true,
+                            });
+                          }
                         }
                       }
 
@@ -943,20 +869,23 @@ export default function CalculatorPage() {
                         };
                       }
 
-                      // Trailing drop warning check
-                      if (entryNum > 0 && currentPeak > entryNum) {
+                      // Trailing drop warning check (فقط إذا كانت الصفقة مفعّلة والتنبيهات مشغلة لها)
+                      if (entryNum > 0 && currentPeak > entryNum && st.isActive !== false && st.alertsEnabled === true) {
                         const peakPnl = ((currentPeak - entryNum) / entryNum) * 100;
                         const dropFromPeak = ((currentPeak - priceNum) / currentPeak) * 100;
                         if (peakPnl >= 0.5 && dropFromPeak >= (st.trailingDropAlertPercent || 0.35)) {
-                          systemNotification.sendNotification({
-                            title: `⚠️ تحذير هبوط من القمة (${st.name})!`,
-                            body: `هبط سعر ${st.name} بنسبة -${dropFromPeak.toFixed(2)}% عن أعلى قمة (${currentPeak} USDT). يُنصح بالخروج السريع لـ USDT!`,
-                            tag: `trailing-${st.id}`,
-                            icon: '/pwa-192x192.png',
-                            badge: '/icon.svg',
-                            renotify: true,
-                            requireInteraction: true,
-                          });
+                          if (canTriggerAlert('targetExit', st.id)) {
+                            recordAlertTriggered('targetExit', st.id);
+                            systemNotification.sendNotification({
+                              title: `⚠️ تحذير هبوط من القمة (${st.name})!`,
+                              body: `هبط سعر ${st.name} بنسبة -${dropFromPeak.toFixed(2)}% عن أعلى قمة (${currentPeak} USDT). يُنصح بالخروج السريع لـ USDT!`,
+                              tag: `trailing-${st.id}`,
+                              icon: '/pwa-192x192.png',
+                              badge: '/icon.svg',
+                              renotify: true,
+                              requireInteraction: true,
+                            });
+                          }
                         }
                       }
 
@@ -1052,6 +981,8 @@ export default function CalculatorPage() {
       name: clean,
       binanceSymbol: pair,
       status: 'watching',
+      isActive: true,
+      alertsEnabled: false, // مضبوط افتراضياً على وضع "مغلق" كما طلب المستخدم
       dipPrice: liveP || undefined,
       dipTimestamp: liveP ? Date.now() : undefined,
       bounceTriggerPercent: 0.4,
@@ -1077,6 +1008,33 @@ export default function CalculatorPage() {
     const next = scalpTrades.filter((t) => t.id !== tradeId);
     setScalpTrades(next);
     persistScalpTrades(next);
+  };
+
+  const handleToggleScalpTradeActive = (tradeId: string) => {
+    const next = scalpTrades.map((t) => {
+      if (t.id === tradeId) {
+        return { ...t, isActive: t.isActive === false ? true : false };
+      }
+      return t;
+    });
+    setScalpTrades(next);
+    persistScalpTrades(next);
+  };
+
+  const handleToggleScalpTradeAlerts = (tradeId: string) => {
+    const next = scalpTrades.map((t) => {
+      if (t.id === tradeId) {
+        return { ...t, alertsEnabled: !t.alertsEnabled };
+      }
+      return t;
+    });
+    setScalpTrades(next);
+    persistScalpTrades(next);
+  };
+
+  const handleClearAllScalpTrades = () => {
+    setScalpTrades([]);
+    persistScalpTrades([]);
   };
 
   const handleOpenScalpTrade = (tradeId: string, entryPrice: string, amountUsdt: string, coinQuantity?: string) => {
@@ -1600,6 +1558,9 @@ export default function CalculatorPage() {
             onAddTrade={handleAddScalpTrade}
             onUpdateTrade={handleUpdateScalpTrade}
             onDeleteTrade={handleDeleteScalpTrade}
+            onToggleActive={handleToggleScalpTradeActive}
+            onToggleAlerts={handleToggleScalpTradeAlerts}
+            onClearAllTrades={handleClearAllScalpTrades}
             onOpenTrade={handleOpenScalpTrade}
             onCloseTradeToUsdt={handleCloseScalpTradeToUsdt}
             onNavigateToCalculator={handleNavigateToCalculatorFromScalp}

@@ -11,6 +11,8 @@ export interface ScalpTrade {
   binanceSymbol: string;    // e.g. "SOLUSDT"
   status: ScalpStatus;
   createdAt: number;
+  isActive?: boolean;       // تفعيل أو إيقاف الصفقة مؤقتاً (تفعيل/غلق)
+  alertsEnabled?: boolean;  // تفعيل أو كتم التنبيهات الخاصة بهذه الصفقة (افتراضياً: مغلق false)
 
   // Parameters for Hunting / Watching
   dipPrice?: string;        // أدنى قاع تم رصده

@@ -18,7 +18,10 @@ import {
   CheckCircle2, 
   AlertTriangle,
   Volume2,
-  Trash2
+  Trash2,
+  Power,
+  Bell,
+  BellOff
 } from 'lucide-react';
 import { trimTrailingZeros } from '@/lib/calculator';
 import { soundAlert } from '@/lib/soundAlert';
@@ -244,6 +247,36 @@ const ScalperDetailModalContent: React.FC<ScalperDetailModalContentProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Active / Inactive Toggle */}
+            <button
+              type="button"
+              onClick={() => onUpdateTrade({ ...trade, isActive: trade.isActive === false ? true : false })}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                trade.isActive !== false
+                  ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-slate-200 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-500'
+              }`}
+              title={trade.isActive !== false ? 'الصفقة مفعّلة — انقر للإيقاف المؤقت' : 'الصفقة متوقفة — انقر للتفعيل'}
+            >
+              <Power className="w-3.5 h-3.5" />
+              <span>{trade.isActive !== false ? 'مفعّلة' : 'غلق'}</span>
+            </button>
+
+            {/* Alerts Toggle (Default OFF) */}
+            <button
+              type="button"
+              onClick={() => onUpdateTrade({ ...trade, alertsEnabled: !trade.alertsEnabled })}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                trade.alertsEnabled
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-600 dark:text-amber-300'
+                  : 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-400'
+              }`}
+              title={trade.alertsEnabled ? 'التنبيهات مشغلة — انقر للغلق' : 'التنبيهات مغلقة (افتراضي) — انقر للتفعيل'}
+            >
+              {trade.alertsEnabled ? <Bell className="w-3.5 h-3.5 text-amber-500" /> : <BellOff className="w-3.5 h-3.5" />}
+              <span>{trade.alertsEnabled ? 'تنبيه' : 'صامت'}</span>
+            </button>
+
             <button
               type="button"
               onClick={() => onNavigateToCalculator(trade)}
