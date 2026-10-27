@@ -27,7 +27,9 @@ import {
   BellRing,
   Target,
   Edit2,
-  X
+  X,
+  GripVertical,
+  RotateCcw
 } from 'lucide-react';
 import { CoinAvatar } from './CoinAvatar';
 import { trimTrailingZeros } from '@/lib/calculator';
@@ -230,6 +232,32 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   const chartOverlayRef = useRef<HTMLDivElement | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Floating Mode Switcher Draggable State (via Long-Press)
+  // Default position: top-left (أعلى يسار الشاشة في الجهة المقابلة لاسم العملة)
+  const [switcherPos, setSwitcherPos] = useState<{ x: number; y: number }>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tv_chart_mode_switcher_pos');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+            return parsed;
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    // Default initial coordinates: top-left (x: 12, y: 12) opposite the coin name
+    return { x: 12, y: 12 };
+  });
+
+  const [isDraggingSwitcher, setIsDraggingSwitcher] = useState(false);
+  const switcherRef = useRef<HTMLDivElement | null>(null);
+  const switcherDragTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const switcherStartPointerRef = useRef<{ clientX: number; clientY: number; initialX: number; initialY: number } | null>(null);
+  const switcherJustDraggedRef = useRef<boolean>(false);
 
   // 1. DYNAMIC IN-CHART LEVEL LINES:
   // Instead of static positions, Entry & Break-Even lines position dynamically relative to Live Price!
@@ -646,6 +674,131 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [contextMenu.visible]);
+
+  // -------------------------------------------------------------
+  // FLOATING MODE SWITCHER: LONG-PRESS DRAG LOGIC (تحريك بالضغط المطول)
+  // -------------------------------------------------------------
+  const cancelSwitcherLongPress = useCallback(() => {
+    if (switcherDragTimerRef.current) {
+      clearTimeout(switcherDragTimerRef.current);
+      switcherDragTimerRef.current = null;
+    }
+  }, []);
+
+  const handleSwitcherPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return; // Left button or primary touch only
+
+    cancelSwitcherLongPress();
+    switcherJustDraggedRef.current = false;
+
+    const overlay = chartOverlayRef.current;
+    const switcher = switcherRef.current;
+    if (!overlay || !switcher) return;
+
+    switcherStartPointerRef.current = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      initialX: switcherPos.x,
+      initialY: switcherPos.y,
+    };
+
+    const targetEl = e.currentTarget;
+
+    // Trigger drag mode after 320ms deliberate hold
+    switcherDragTimerRef.current = setTimeout(() => {
+      setIsDraggingSwitcher(true);
+      switcherJustDraggedRef.current = true;
+      try {
+        targetEl.setPointerCapture(e.pointerId);
+      } catch {
+        // Ignore
+      }
+      if (typeof window !== 'undefined' && 'navigator' in window && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(35);
+        } catch {
+          // Ignore
+        }
+      }
+    }, 320);
+  };
+
+  const handleSwitcherPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!switcherStartPointerRef.current) return;
+
+    if (!isDraggingSwitcher) {
+      const dist = Math.hypot(
+        e.clientX - switcherStartPointerRef.current.clientX,
+        e.clientY - switcherStartPointerRef.current.clientY
+      );
+      if (dist > 8) {
+        // Moving before timer fires: cancel long-press so user can scroll/tap normally
+        cancelSwitcherLongPress();
+      }
+      return;
+    }
+
+    // Active drag in progress
+    e.preventDefault();
+    switcherJustDraggedRef.current = true;
+
+    const overlay = chartOverlayRef.current;
+    const switcher = switcherRef.current;
+    if (!overlay || !switcher) return;
+
+    const overlayRect = overlay.getBoundingClientRect();
+    const switcherRect = switcher.getBoundingClientRect();
+
+    const deltaX = e.clientX - switcherStartPointerRef.current.clientX;
+    const deltaY = e.clientY - switcherStartPointerRef.current.clientY;
+
+    const maxX = Math.max(8, overlayRect.width - switcherRect.width - 8);
+    const maxY = Math.max(8, overlayRect.height - switcherRect.height - 8);
+
+    const newX = Math.max(8, Math.min(maxX, switcherStartPointerRef.current.initialX + deltaX));
+    const newY = Math.max(8, Math.min(maxY, switcherStartPointerRef.current.initialY + deltaY));
+
+    setSwitcherPos({ x: Math.round(newX), y: Math.round(newY) });
+  };
+
+  const handleSwitcherPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    cancelSwitcherLongPress();
+
+    if (isDraggingSwitcher) {
+      setIsDraggingSwitcher(false);
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        // Ignore
+      }
+
+      // Persist chosen custom position
+      try {
+        localStorage.setItem('tv_chart_mode_switcher_pos', JSON.stringify(switcherPos));
+      } catch {
+        // Ignore
+      }
+
+      setTimeout(() => {
+        switcherJustDraggedRef.current = false;
+      }, 120);
+    } else {
+      switcherJustDraggedRef.current = false;
+    }
+
+    switcherStartPointerRef.current = null;
+  };
+
+  const handleResetSwitcherPos = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const defaultPos = { x: 12, y: 12 };
+    setSwitcherPos(defaultPos);
+    try {
+      localStorage.setItem('tv_chart_mode_switcher_pos', JSON.stringify(defaultPos));
+    } catch {
+      // Ignore
+    }
+  };
 
   // -------------------------------------------------------------
   // SAVE AS IMAGE (حفظ لقطة شاشة للشارت مع كافة الخطوط)
@@ -1128,10 +1281,40 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
           className={`relative flex-1 w-full h-full min-h-[350px] ${isDark ? 'bg-slate-950' : 'bg-white'}`}
         >
           {/* Top Left Floating Switch: Long-Press Draw Mode vs Native TradingView Candle Mode */}
-          <div className="absolute top-2 left-2 z-35 flex items-center gap-1 p-1 rounded-xl bg-slate-900/85 backdrop-blur-md border border-slate-700/80 shadow-lg text-[11px] font-bold select-none">
+          {/* Draggable via Long-Press (تحريك بالسحب عند الضغط المطول) - Default at top-left opposite coin name */}
+          <div 
+            ref={switcherRef}
+            style={{
+              position: 'absolute',
+              top: `${switcherPos.y}px`,
+              left: `${switcherPos.x}px`,
+              touchAction: 'none',
+            }}
+            onPointerDown={handleSwitcherPointerDown}
+            onPointerMove={handleSwitcherPointerMove}
+            onPointerUp={handleSwitcherPointerUp}
+            onPointerCancel={handleSwitcherPointerUp}
+            className={`z-35 flex items-center gap-1.5 p-1 rounded-xl backdrop-blur-md border transition-shadow select-none ${
+              isDraggingSwitcher 
+                ? 'cursor-grabbing shadow-2xl ring-2 ring-cyan-400 bg-slate-900 border-cyan-400 scale-105 duration-75' 
+                : 'cursor-grab shadow-lg bg-slate-900/90 border-slate-700/80 hover:border-slate-600 duration-200'
+            } text-[11px] font-bold`}
+            title="اضغط مطولاً لسحب الزر إلى أي مكان بالشاشة"
+          >
+            {/* Drag Handle / Grip Indicator */}
+            <div 
+              className="flex items-center justify-center pl-1 text-slate-400 hover:text-cyan-400 transition"
+              title="مقبض التحريك: اضغط مطولاً للسحب إلى أي مكان"
+            >
+              <GripVertical className="w-3.5 h-3.5" />
+            </div>
+
             <button
               type="button"
-              onClick={() => setChartInteractionMode('draw_gesture')}
+              onClick={() => {
+                if (switcherJustDraggedRef.current) return;
+                setChartInteractionMode('draw_gesture');
+              }}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition cursor-pointer ${
                 chartInteractionMode === 'draw_gesture'
                   ? 'bg-cyan-500 text-slate-950 shadow-xs font-black'
@@ -1144,7 +1327,10 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setChartInteractionMode('browse_chart')}
+              onClick={() => {
+                if (switcherJustDraggedRef.current) return;
+                setChartInteractionMode('browse_chart');
+              }}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition cursor-pointer ${
                 chartInteractionMode === 'browse_chart'
                   ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
@@ -1155,6 +1341,25 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               <Eye className="w-3.5 h-3.5" />
               <span>تصفح الشموع 📊</span>
             </button>
+
+            {/* Reset to Default Top-Left Position if moved */}
+            {(switcherPos.x !== 12 || switcherPos.y !== 12) && !isDraggingSwitcher && (
+              <button
+                type="button"
+                onClick={handleResetSwitcherPos}
+                className="p-1 rounded-md text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
+                title="إعادة الزر لمكانه الافتراضي في أعلى اليسار (المقابل لاسم العملة)"
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+            )}
+
+            {/* Active Dragging Hint */}
+            {isDraggingSwitcher && (
+              <span className="absolute -top-7 right-0 text-[10px] font-black text-cyan-300 bg-slate-950/90 border border-cyan-500/40 px-2 py-0.5 rounded-md shadow-md animate-pulse whitespace-nowrap">
+                جارِ التحريك... أفلِت في أي مكان
+              </span>
+            )}
           </div>
 
           <iframe
