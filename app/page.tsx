@@ -43,6 +43,7 @@ import { ScalperDashboard } from '@/components/ScalperDashboard';
 import { ThemeCustomizerModal } from '@/components/ThemeCustomizerModal';
 import { BreakEvenComparisonDrawer } from '@/components/BreakEvenComparisonDrawer';
 import { WatchlistDashboard } from '@/components/WatchlistDashboard';
+import { RangeScalperDashboard } from '@/components/RangeScalperDashboard';
 import { TradingViewChartModal } from '@/components/TradingViewChartModal';
 import { 
   WatchlistItem, 
@@ -53,11 +54,21 @@ import {
 } from '@/types/watchlist';
 import { systemNotification } from '@/lib/systemNotification';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
-import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList } from 'lucide-react';
+import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList, Layers } from 'lucide-react';
 
 export default function CalculatorPage() {
-  // Navigation Tabs: 'calculator' | 'tracker' | 'scalper' | 'watchlist'
-  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'tracker' | 'scalper' | 'watchlist'>('watchlist');
+  // Navigation Tabs: 'calculator' | 'tracker' | 'scalper' | 'watchlist' | 'range_master'
+  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'tracker' | 'scalper' | 'watchlist' | 'range_master'>('range_master');
+  const [rangeStreamSymbols, setRangeStreamSymbols] = useState<string[]>([]);
+
+  const handleRegisterRangeSymbols = useCallback((symbols: string[]) => {
+    setRangeStreamSymbols((prev) => {
+      if (prev.length === symbols.length && prev.every((s, i) => s === symbols[i])) {
+        return prev;
+      }
+      return symbols;
+    });
+  }, []);
 
   // Window State for Calculator
   const [windowMode, setWindowMode] = useState<WindowMode>('normal');
@@ -725,16 +736,17 @@ export default function CalculatorPage() {
     persistWatchlistItemsRef.current = persistWatchlistItems;
   }, [persistWatchlistItems]);
 
-  // Combined symbols key for WebSocket (Tracker + Scalper + Watchlist)
+  // Combined symbols key for WebSocket (Tracker + Scalper + Watchlist + Range Master)
   const trackedSymbolsKey = useMemo(() => {
     if (!isTrackerStreamActive) return '';
     const tr = trackedCurrencies.map((tc) => tc.binanceSymbol.toLowerCase());
     const sc = scalpTrades.map((st) => st.binanceSymbol.toLowerCase());
     const wl = watchlistItems.map((wi) => wi.symbol.toLowerCase());
-    const combined = Array.from(new Set([...tr, ...sc, ...wl]));
+    const rg = rangeStreamSymbols.map((s) => s.toLowerCase());
+    const combined = Array.from(new Set([...tr, ...sc, ...wl, ...rg]));
     if (combined.length === 0) return '';
     return combined.sort().join('/');
-  }, [isTrackerStreamActive, trackedCurrencies, scalpTrades, watchlistItems]);
+  }, [isTrackerStreamActive, trackedCurrencies, scalpTrades, watchlistItems, rangeStreamSymbols]);
 
   // Real-time WebSocket connection to Binance for both Tracker and Scalper
   useEffect(() => {
@@ -1590,6 +1602,43 @@ export default function CalculatorPage() {
             onSetPriceAlert={handleSetWatchlistAlert}
           />
         )}
+        {/* ========================================================= */}
+        {/* TAB 5: RANGE MASTER SCALPER (صائد القيعان والمسار العرضي) */}
+        {/* ========================================================= */}
+        {activeMainTab === 'range_master' && (
+          <RangeScalperDashboard
+            livePrices={trackerLivePrices}
+            isLiveStreamActive={isTrackerStreamActive}
+            watchlistSymbols={watchlistItems.map((w) => w.symbol)}
+            trackerSymbols={trackedCurrencies.map((t) => t.binanceSymbol)}
+            defaultEntryFeePercent={defaultFees.entryFeePercent || '0.1'}
+            defaultExitFeePercent={defaultFees.exitFeePercent || '0.1'}
+            onToggleLiveStream={handleToggleTrackerStream}
+            onOpenChart={(symbol) => handleOpenChartForCurrency({ symbol, name: symbol.replace('USDT', '') })}
+            onNavigateToCalculator={(name, price) => handleSendToCalculatorAsEntry(name, price)}
+            onNavigateToTracker={(symbol) => {
+              if (symbol) {
+                const clean = symbol.replace('USDT', '').trim().toUpperCase();
+                const match = trackedCurrencies.find((t) => t.name === clean);
+                if (match) setActiveTrackedId(match.id);
+              }
+              setActiveMainTab('tracker');
+            }}
+            onNavigateToScalper={(symbol) => {
+              if (symbol) {
+                const clean = symbol.replace('USDT', '').trim().toUpperCase();
+                const exists = scalpTrades.some((s) => s.name === clean);
+                if (!exists) {
+                  handleAddScalpTrade(clean);
+                }
+              }
+              setActiveMainTab('scalper');
+            }}
+            onNavigateToWatchlist={() => setActiveMainTab('watchlist')}
+            onOpenThemeCustomizer={() => setIsThemeCustomizerOpen(true)}
+            onRegisterSymbolsForStream={handleRegisterRangeSymbols}
+          />
+        )}
       </div>
 
       {/* Settings Modal */}
@@ -1640,18 +1689,18 @@ export default function CalculatorPage() {
         />
       )}
 
-      {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة للعناصر الأربعة بتباين فائق) */}
+      {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة للعناصر الخمسة بتباين فائق) */}
       <nav 
-        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-300 dark:border-slate-800 py-2 px-2 sm:px-6 shadow-[0_-4px_25px_rgba(0,0,0,0.12)] dark:shadow-[0_-4px_25px_rgba(0,0,0,0.6)]"
+        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-300 dark:border-slate-800 py-2 px-2 sm:px-4 shadow-[0_-4px_25px_rgba(0,0,0,0.12)] dark:shadow-[0_-4px_25px_rgba(0,0,0,0.6)]"
         dir="rtl"
         aria-label="القائمة الرئيسية الثابتة"
       >
-        <div className="max-w-3xl mx-auto grid grid-cols-4 gap-1.5 sm:gap-2">
+        <div className="max-w-4xl mx-auto grid grid-cols-5 gap-1 sm:gap-2">
           {/* Item 1: حاسبة التجارة والتعادل */}
           <button
             type="button"
             onClick={() => setActiveMainTab('calculator')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-3 rounded-2xl transition-all cursor-pointer ${
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
               activeMainTab === 'calculator'
                 ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
                 : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
@@ -1666,11 +1715,32 @@ export default function CalculatorPage() {
             </span>
           </button>
 
-          {/* Item 2: لوحة السكالبينج السريعة */}
+          {/* Item 2: صائد القيعان والمسار العرضي (الجديد) */}
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('range_master')}
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
+              activeMainTab === 'range_master'
+                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
+                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+            }`}
+          >
+            <Layers className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'range_master' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
+            <span className="text-[10px] sm:text-xs tracking-tight">صائد القيعان</span>
+            {rangeStreamSymbols.length > 0 && (
+              <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
+                activeMainTab === 'range_master' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
+              }`}>
+                {rangeStreamSymbols.length}
+              </span>
+            )}
+          </button>
+
+          {/* Item 3: لوحة السكالبينج السريعة */}
           <button
             type="button"
             onClick={() => setActiveMainTab('scalper')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-3 rounded-2xl transition-all cursor-pointer relative ${
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer relative ${
               activeMainTab === 'scalper'
                 ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
                 : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
@@ -1688,11 +1758,11 @@ export default function CalculatorPage() {
             )}
           </button>
 
-          {/* Item 3: ترجمات عاجلة (رصد صعود العملات) */}
+          {/* Item 4: ترجمات عاجلة (رصد صعود العملات) */}
           <button
             type="button"
             onClick={() => setActiveMainTab('tracker')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-3 rounded-2xl transition-all cursor-pointer ${
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
               activeMainTab === 'tracker'
                 ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
                 : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
@@ -1707,11 +1777,11 @@ export default function CalculatorPage() {
             </span>
           </button>
 
-          {/* Item 4: قائمة المراقبة (TradingView Watchlist) */}
+          {/* Item 5: قائمة المراقبة (TradingView Watchlist) */}
           <button
             type="button"
             onClick={() => setActiveMainTab('watchlist')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-3 rounded-2xl transition-all cursor-pointer ${
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
               activeMainTab === 'watchlist'
                 ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
                 : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
