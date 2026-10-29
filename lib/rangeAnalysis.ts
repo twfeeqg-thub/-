@@ -1,4 +1,4 @@
-import { RangeAnalysisResult } from '@/types/rangeScalper';
+import { RangeAnalysisResult, Binance24hTickerItem } from '@/types/rangeScalper';
 
 interface BinanceKlineRaw {
   openTime: number;
@@ -11,19 +11,32 @@ interface BinanceKlineRaw {
 }
 
 /**
+ * حساب سعر التعادل بدقة بناءً على سعر الدخول والرسوم التراكمية
+ */
+export function calculateRangeBreakEven(
+  entryPrice: number, 
+  entryFeePercent = 0.1, 
+  exitFeePercent = 0.1,
+  slippagePercent = 0
+): number {
+  if (entryPrice <= 0) return 0;
+  const buyFee = (entryFeePercent + (slippagePercent / 2)) / 100;
+  const sellFee = (exitFeePercent + (slippagePercent / 2)) / 100;
+  if (sellFee >= 1) return entryPrice * 2;
+  return (entryPrice * (1 + buyFee)) / (1 - sellFee);
+}
+
+/**
  * جلب شموع الدقيقة (1m) مباشرة من Binance وحساب القمم والقيعان الحقيقية
- * @param symbol رمز التداول على بينانس مثل 'NEARUSDT'
- * @param minutes عدد الدقائق المطلوب تحليلها (مثلاً 60 لـ 1 ساعة)
- * @param entryFeePercent نسبة رسوم الشراء
- * @param exitFeePercent نسبة رسوم البيع
- * @param slippagePercent نسبة الانزلاق السعري المتوقع
+ * مع حساب سعر التعادل والقيم النقدية والمئوية المزدوجة
  */
 export async function analyzeRangeFromMinuteKlines(
   symbol: string,
   minutes: number,
   entryFeePercent = 0.1,
   exitFeePercent = 0.1,
-  slippagePercent = 0.1
+  slippagePercent = 0.1,
+  tradeCapitalUsdt = 100
 ): Promise<RangeAnalysisResult> {
   const cleanSymbol = symbol.trim().toUpperCase();
   const pair = cleanSymbol.endsWith('USDT') ? cleanSymbol : `${cleanSymbol}USDT`;
@@ -92,14 +105,29 @@ export async function analyzeRangeFromMinuteKlines(
       if (h >= peakZoneThreshold) peakTouchesCount++;
     });
 
+    // الحسابات المئوية والمالية المزدوجة
     const grossSpreadPercent = ((maxHigh - minLow) / minLow) * 100;
+    const grossSpreadUsdt = (tradeCapitalUsdt * grossSpreadPercent) / 100;
+
+    const entryFeeUsdt = (tradeCapitalUsdt * entryFeePercent) / 100;
+    const exitFeeUsdt = (tradeCapitalUsdt * exitFeePercent) / 100;
+    const slippageUsdt = (tradeCapitalUsdt * slippagePercent) / 100;
+
     const totalCostPercent = entryFeePercent + exitFeePercent + slippagePercent;
+    const totalCostUsdt = entryFeeUsdt + exitFeeUsdt + slippageUsdt;
+
     const netExpectedMarginPercent = grossSpreadPercent - totalCostPercent;
+    const netExpectedMarginUsdt = grossSpreadUsdt - totalCostUsdt;
+
+    const breakEvenPrice = calculateRangeBreakEven(minLow, entryFeePercent, exitFeePercent, slippagePercent);
 
     const distanceToTroughPercent = currentPrice > 0 ? ((currentPrice - minLow) / minLow) * 100 : 0;
-    const distanceToPeakPercent = currentPrice > 0 ? ((maxHigh - currentPrice) / currentPrice) * 100 : 0;
+    const distanceToTroughUsdt = (tradeCapitalUsdt * distanceToTroughPercent) / 100;
 
-    const isViable = netExpectedMarginPercent >= 0.25; // تعتبر مجدية إذا كان الربح الصافي بعد التكاليف ربع بالمائة على الأقل
+    const distanceToPeakPercent = currentPrice > 0 ? ((maxHigh - currentPrice) / currentPrice) * 100 : 0;
+    const distanceToPeakUsdt = (tradeCapitalUsdt * distanceToPeakPercent) / 100;
+
+    const isViable = netExpectedMarginPercent >= 0.25;
 
     return {
       symbol: baseName,
@@ -109,31 +137,91 @@ export async function analyzeRangeFromMinuteKlines(
       troughPrice: minLow,
       peakPrice: maxHigh,
       currentPrice: currentPrice || minLow,
+      tradeCapitalUsdt,
+      breakEvenPrice,
       grossSpreadPercent,
+      grossSpreadUsdt,
       distanceToTroughPercent,
+      distanceToTroughUsdt,
       distanceToPeakPercent,
+      distanceToPeakUsdt,
       troughTouchesCount: Math.max(1, troughTouchesCount),
       peakTouchesCount: Math.max(1, peakTouchesCount),
       entryFeePercent,
+      entryFeeUsdt,
       exitFeePercent,
+      exitFeeUsdt,
       slippagePercent,
+      slippageUsdt,
       totalCostPercent,
+      totalCostUsdt,
       netExpectedMarginPercent,
+      netExpectedMarginUsdt,
       isViable,
       lastFetchedAt: Date.now(),
     };
   } catch (err) {
-    // في حال حدوث خطأ في الاتصال، يتم حساب نتائج استرشادية بناءً على السعر التقريبي
     throw err;
   }
 }
 
+// ذاكرة تخزين مؤقتة لقائمة عملات بينانس لتسريع البحث
+let cachedBinanceTickers: Binance24hTickerItem[] | null = null;
+let lastTickersFetchTime = 0;
+
 /**
- * حساب سعر التعادل بناءً على سعر الدخول والرسوم التراكمية
+ * جلب جميع أزواج USDT النشطة من بينانس للبحث والاستكشاف
  */
-export function calculateRangeBreakEven(entryPrice: number, entryFeePercent = 0.1, exitFeePercent = 0.1): number {
-  if (entryPrice <= 0) return 0;
-  const buyFee = entryFeePercent / 100;
-  const sellFee = exitFeePercent / 100;
-  return (entryPrice * (1 + buyFee)) / (1 - sellFee);
+export async function fetchBinanceUsdtTickers(): Promise<Binance24hTickerItem[]> {
+  const now = Date.now();
+  // استخدام الكاش لمدة 45 ثانية
+  if (cachedBinanceTickers && (now - lastTickersFetchTime < 45000)) {
+    return cachedBinanceTickers;
+  }
+
+  try {
+    const res = await fetch('https://api.binance.com/api/v3/ticker/24hr', {
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      if (cachedBinanceTickers) return cachedBinanceTickers;
+      throw new Error(`Binance 24hr API Error: ${res.status}`);
+    }
+
+    const data: any[] = await res.json();
+    if (!Array.isArray(data)) return cachedBinanceTickers || [];
+
+    const usdtPairs: Binance24hTickerItem[] = [];
+
+    data.forEach((item) => {
+      const sym: string = item.symbol || '';
+      if (sym.endsWith('USDT') && !sym.includes('UPUSDT') && !sym.includes('DOWNUSDT')) {
+        const quoteVolume = parseFloat(item.quoteVolume || '0');
+        // تصفية الأزواج الميتة (أكثر من 50,000 دولار حجم تداول يومي)
+        if (quoteVolume > 50000) {
+          usdtPairs.push({
+            symbol: sym,
+            baseAsset: sym.replace('USDT', ''),
+            lastPrice: item.lastPrice,
+            priceChangePercent: item.priceChangePercent,
+            volumeUsdt: quoteVolume,
+            highPrice: item.highPrice,
+            lowPrice: item.lowPrice,
+          });
+        }
+      }
+    });
+
+    // ترتيب الأزواج حسب حجم التداول
+    usdtPairs.sort((a, b) => b.volumeUsdt - a.volumeUsdt);
+
+    cachedBinanceTickers = usdtPairs;
+    lastTickersFetchTime = now;
+    return usdtPairs;
+  } catch (err) {
+    if (cachedBinanceTickers) return cachedBinanceTickers;
+    return [];
+  }
 }

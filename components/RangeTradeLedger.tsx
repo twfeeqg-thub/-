@@ -41,8 +41,16 @@ export const RangeTradeLedger: React.FC<RangeTradeLedgerProps> = ({
   }
 
   // Summary stats
-  const totalPnlUsdt = closedTrades.reduce((acc, t) => acc + (t.realizedPnlUsdt || 0), 0);
-  const winningCount = closedTrades.filter((t) => (t.realizedPnlUsdt || 0) > 0).length;
+  const totalNetPnlUsdt = closedTrades.reduce((acc, t) => {
+    const val = t.realizedNetPnlUsdt !== undefined ? t.realizedNetPnlUsdt : (t.realizedPnlUsdt || 0);
+    return acc + val;
+  }, 0);
+
+  const winningCount = closedTrades.filter((t) => {
+    const val = t.realizedNetPnlUsdt !== undefined ? t.realizedNetPnlUsdt : (t.realizedPnlUsdt || 0);
+    return val > 0;
+  }).length;
+
   const winRate = closedTrades.length > 0 ? (winningCount / closedTrades.length) * 100 : 0;
 
   return (
@@ -57,7 +65,7 @@ export const RangeTradeLedger: React.FC<RangeTradeLedgerProps> = ({
             </h2>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            توثيق كامل لمواعيد الدخول والخروج، وحجم المكسب المحقق، مع ميزة التنبيه عند عودة السعر لنفس القاع القديم
+            توثيق كامل لمواعيد الدخول والخروج، وحجم المكسب الصافي، مع ميزة التنبيه عند عودة السعر لنفس القاع القديم
           </p>
         </div>
 
@@ -69,19 +77,17 @@ export const RangeTradeLedger: React.FC<RangeTradeLedgerProps> = ({
           </div>
 
           <div className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold ${
-            totalPnlUsdt >= 0 ? 'bg-emerald-500/15 text-emerald-500' : 'bg-rose-500/15 text-rose-500'
+            totalNetPnlUsdt >= 0 ? 'bg-emerald-500/15 text-emerald-500' : 'bg-rose-500/15 text-rose-500'
           }`}>
-            <span className="ml-1">إجمالي الأرباح:</span>
-            <span className="font-black">{totalPnlUsdt >= 0 ? '+' : ''}{totalPnlUsdt.toFixed(2)}$</span>
+            <span className="ml-1">صافي الأرباح المحققة:</span>
+            <span className="font-black">
+              {totalNetPnlUsdt >= 0 ? '+' : ''}${totalNetPnlUsdt.toFixed(2)} USDT
+            </span>
           </div>
 
           <button
             type="button"
-            onClick={() => {
-              if (confirm('هل تريد مسح سجل الصفقات المنفذة بالكامل؟')) {
-                onClearAllHistory();
-              }
-            }}
+            onClick={onClearAllHistory}
             className="p-2 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
             title="مسح السجل كاملاً"
           >
@@ -93,7 +99,8 @@ export const RangeTradeLedger: React.FC<RangeTradeLedgerProps> = ({
       {/* TRADES LIST */}
       <div className="space-y-2.5">
         {closedTrades.map((item) => {
-          const isProfit = (item.realizedPnlUsdt || 0) >= 0;
+          const netUsdt = item.realizedNetPnlUsdt !== undefined ? item.realizedNetPnlUsdt : (item.realizedPnlUsdt || 0);
+          const isProfit = netUsdt >= 0;
           const entryTimeStr = item.entryTimestamp
             ? new Date(item.entryTimestamp).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
             : '—';
@@ -134,13 +141,13 @@ export const RangeTradeLedger: React.FC<RangeTradeLedgerProps> = ({
 
               {/* Profit / Loss Metrics & Repeat Alert Toggle */}
               <div className="flex flex-wrap items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-200/60 dark:border-slate-800/60">
-                {/* Realized Amount */}
+                {/* Realized Amount and Percent */}
                 <div className="text-right sm:text-left" dir="ltr">
                   <div className={`font-mono font-black text-sm ${isProfit ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {isProfit ? '+' : ''}{(item.realizedPnlPercent || 0).toFixed(2)}%
+                    {isProfit ? '+' : ''}${netUsdt.toFixed(2)} USDT
                   </div>
-                  <div className="text-[11px] font-mono text-slate-500">
-                    {isProfit ? '+' : ''}{(item.realizedPnlUsdt || 0).toFixed(2)}$
+                  <div className={`text-[11px] font-mono font-bold ${isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600'}`}>
+                    ({isProfit ? '+' : ''}{(item.realizedPnlPercent || 0).toFixed(2)}% صافي)
                   </div>
                 </div>
 
@@ -159,9 +166,9 @@ export const RangeTradeLedger: React.FC<RangeTradeLedgerProps> = ({
                       : 'انقر لتفعيل تنبيه فور عودة السعر لنفس القاع القديم ($' + item.troughPrice + ')'
                   }
                 >
-                  {item.notifyOnOldTroughReturn ? <Bell className="w-3.5 h-3.5 text-amber-500" /> : <BellOff className="w-3.5 h-3.5" />}
+                  {item.notifyOnOldTroughReturn ? <Bell className="w-3.5 h-3.5 text-amber-500 fill-current" /> : <BellOff className="w-3.5 h-3.5" />}
                   <span className="text-[10px]">
-                    {item.notifyOnOldTroughReturn ? 'تنبيه عودة القاع' : 'تفعيل تنبيه القاع'}
+                    {item.notifyOnOldTroughReturn ? 'تنبيه القاع القديم (مفعل)' : 'تنبيه القاع القديم (صامت)'}
                   </span>
                 </button>
 
@@ -189,7 +196,7 @@ export const RangeTradeLedger: React.FC<RangeTradeLedgerProps> = ({
                 {/* Fast Hop to Chart */}
                 <button
                   type="button"
-                  onClick={() => onOpenChart(item.name)}
+                  onClick={() => onOpenChart(item.binanceSymbol)}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 transition cursor-pointer"
                   title="عرض الشارت"
                 >

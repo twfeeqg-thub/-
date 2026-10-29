@@ -6,14 +6,17 @@ import {
   RangeAnalysisResult, 
   RANGE_TIMEFRAME_OPTIONS, 
   SECTOR_PRESETS,
+  DEFAULT_RANGE_ALERT_CONFIG,
+  Binance24hTickerItem,
   STORAGE_KEY_RANGE_TRADES,
-  STORAGE_KEY_RANGE_COSTS
+  STORAGE_KEY_RANGE_COSTS,
+  STORAGE_KEY_RANGE_SAVED_COINS
 } from '@/types/rangeScalper';
-import { analyzeRangeFromMinuteKlines } from '@/lib/rangeAnalysis';
+import { analyzeRangeFromMinuteKlines, calculateRangeBreakEven, fetchBinanceUsdtTickers } from '@/lib/rangeAnalysis';
 import { RangeTradeCard } from './RangeTradeCard';
 import { RangeTradeLedger } from './RangeTradeLedger';
 import { trimTrailingZeros } from '@/lib/calculator';
-import { soundAlert } from '@/lib/soundAlert';
+import { soundAlert, AlertToneId } from '@/lib/soundAlert';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
 import { systemNotification } from '@/lib/systemNotification';
 import { 
@@ -34,7 +37,13 @@ import {
   Sparkles,
   RefreshCw,
   Trash2,
-  Maximize2
+  Maximize2,
+  Bookmark,
+  DollarSign,
+  Percent,
+  Compass,
+  Flame,
+  Globe
 } from 'lucide-react';
 
 interface RangeScalperDashboardProps {
@@ -94,8 +103,32 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     }
   }, []);
 
-  // 2. COST SETTINGS (MANUAL INPUTS)
-  const [entryFeeInput, setEntryFeeInput] = useState<string>(() => {
+  // 2. SAVED / PINNED COINS STATE
+  const [savedCoins, setSavedCoins] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return ['NEAR', 'SOL', 'PEPE', 'FET', 'SUI'];
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_RANGE_SAVED_COINS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return ['NEAR', 'SOL', 'PEPE', 'FET', 'SUI'];
+  });
+
+  const persistSavedCoins = (coins: string[]) => {
+    setSavedCoins(coins);
+    try {
+      localStorage.setItem(STORAGE_KEY_RANGE_SAVED_COINS, JSON.stringify(coins));
+    } catch {}
+  };
+
+  // 3. TRADE CAPITAL & DUAL COSTS INPUTS (نسبة % ومبلغ $)
+  const [tradeCapitalInput, setTradeCapitalInput] = useState<string>('100');
+  const capitalNum = parseFloat(tradeCapitalInput) || 100;
+
+  // Entry Fee
+  const [entryFeePercentInput, setEntryFeePercentInput] = useState<string>(() => {
     if (typeof window === 'undefined') return defaultEntryFeePercent;
     try {
       const saved = localStorage.getItem(STORAGE_KEY_RANGE_COSTS);
@@ -103,8 +136,13 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     } catch {}
     return defaultEntryFeePercent;
   });
+  const [entryFeeUsdtInput, setEntryFeeUsdtInput] = useState<string>(() => {
+    const pct = parseFloat(entryFeePercentInput) || 0.1;
+    return ((100 * pct) / 100).toFixed(2);
+  });
 
-  const [exitFeeInput, setExitFeeInput] = useState<string>(() => {
+  // Exit Fee
+  const [exitFeePercentInput, setExitFeePercentInput] = useState<string>(() => {
     if (typeof window === 'undefined') return defaultExitFeePercent;
     try {
       const saved = localStorage.getItem(STORAGE_KEY_RANGE_COSTS);
@@ -112,19 +150,96 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     } catch {}
     return defaultExitFeePercent;
   });
+  const [exitFeeUsdtInput, setExitFeeUsdtInput] = useState<string>(() => {
+    const pct = parseFloat(exitFeePercentInput) || 0.1;
+    return ((100 * pct) / 100).toFixed(2);
+  });
 
-  const [slippageInput, setSlippageInput] = useState<string>('0.1');
+  // Slippage
+  const [slippagePercentInput, setSlippagePercentInput] = useState<string>('0.1');
+  const [slippageUsdtInput, setSlippageUsdtInput] = useState<string>('0.10');
 
-  const persistCosts = (entry: string, exit: string, slip: string) => {
+  // Synchronize percent to USDT
+  const handleUpdateFeePercent = (type: 'entry' | 'exit' | 'slippage', percentVal: string) => {
+    const pNum = parseFloat(percentVal) || 0;
+    const usdtVal = ((capitalNum * pNum) / 100).toFixed(2);
+
+    if (type === 'entry') {
+      setEntryFeePercentInput(percentVal);
+      setEntryFeeUsdtInput(usdtVal);
+    } else if (type === 'exit') {
+      setExitFeePercentInput(percentVal);
+      setExitFeeUsdtInput(usdtVal);
+    } else {
+      setSlippagePercentInput(percentVal);
+      setSlippageUsdtInput(usdtVal);
+    }
+
     try {
-      localStorage.setItem(STORAGE_KEY_RANGE_COSTS, JSON.stringify({ entryFee: entry, exitFee: exit, slippage: slip }));
+      localStorage.setItem(STORAGE_KEY_RANGE_COSTS, JSON.stringify({
+        entryFee: type === 'entry' ? percentVal : entryFeePercentInput,
+        exitFee: type === 'exit' ? percentVal : exitFeePercentInput,
+        slippage: type === 'slippage' ? percentVal : slippagePercentInput,
+      }));
     } catch {}
   };
 
-  // 3. ANALYSIS CONTROLS
+  // Synchronize USDT to percent
+  const handleUpdateFeeUsdt = (type: 'entry' | 'exit' | 'slippage', usdtVal: string) => {
+    const uNum = parseFloat(usdtVal) || 0;
+    const pVal = capitalNum > 0 ? ((uNum / capitalNum) * 100).toFixed(2) : '0.1';
+
+    if (type === 'entry') {
+      setEntryFeeUsdtInput(usdtVal);
+      setEntryFeePercentInput(pVal);
+    } else if (type === 'exit') {
+      setExitFeeUsdtInput(usdtVal);
+      setExitFeePercentInput(pVal);
+    } else {
+      setSlippageUsdtInput(usdtVal);
+      setSlippagePercentInput(pVal);
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEY_RANGE_COSTS, JSON.stringify({
+        entryFee: type === 'entry' ? pVal : entryFeePercentInput,
+        exitFee: type === 'exit' ? pVal : exitFeePercentInput,
+        slippage: type === 'slippage' ? pVal : slippagePercentInput,
+      }));
+    } catch {}
+  };
+
+  // 4. COIN DISCOVERY & BINANCE SPOT TICKERS
+  const [binanceTickers, setBinanceTickers] = useState<Binance24hTickerItem[]>([]);
+  const [isLoadingTickers, setIsLoadingTickers] = useState<boolean>(false);
+  const [activeSectorTab, setActiveSectorTab] = useState<string>('ai');
+  const [searchFilter, setSearchFilter] = useState<string>('');
+
+  // Fetch Binance all-pairs on mount
+  useEffect(() => {
+    let isMounted = true;
+    const loadTickers = async () => {
+      setIsLoadingTickers(true);
+      try {
+        const pairs = await fetchBinanceUsdtTickers();
+        if (isMounted && pairs.length > 0) {
+          setBinanceTickers(pairs);
+        }
+      } catch {
+        // Fallback or ignore
+      } finally {
+        if (isMounted) setIsLoadingTickers(false);
+      }
+    };
+    loadTickers();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // 5. ANALYSIS CONTROLS
   const [selectedTimeframeMinutes, setSelectedTimeframeMinutes] = useState<number>(60);
   const [symbolInput, setSymbolInput] = useState<string>('NEAR');
-  const [activeSectorTab, setActiveSectorTab] = useState<string>('ai');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [currentAnalysis, setCurrentAnalysis] = useState<RangeAnalysisResult | null>(null);
@@ -132,7 +247,7 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
   // Active filter tab
   const [activeFilter, setActiveFilter] = useState<'all' | 'watching_trough' | 'in_trade'>('all');
 
-  // Trigger automated 1m klines analysis
+  // Trigger automated 1m klines analysis with dual metrics
   const handleRunAnalysis = useCallback(async (targetSymbol?: string, targetMinutes?: number) => {
     const sym = (targetSymbol || symbolInput).trim().toUpperCase();
     if (!sym) return;
@@ -141,9 +256,10 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     setIsAnalyzing(true);
     setAnalysisError(null);
 
-    const entryF = parseFloat(entryFeeInput) || 0.1;
-    const exitF = parseFloat(exitFeeInput) || 0.1;
-    const slip = parseFloat(slippageInput) || 0.1;
+    const entryF = parseFloat(entryFeePercentInput) || 0.1;
+    const exitF = parseFloat(exitFeePercentInput) || 0.1;
+    const slip = parseFloat(slippagePercentInput) || 0.1;
+    const cap = parseFloat(tradeCapitalInput) || 100;
 
     try {
       const result = await analyzeRangeFromMinuteKlines(
@@ -151,15 +267,22 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
         tf,
         entryF,
         exitF,
-        slip
+        slip,
+        cap
       );
       setCurrentAnalysis(result);
+      setSymbolInput(result.symbol);
+
+      // Save to recently searched / saved coins
+      if (!savedCoins.includes(result.symbol)) {
+        persistSavedCoins([result.symbol, ...savedCoins].slice(0, 20));
+      }
     } catch (err: any) {
       setAnalysisError(err.message || 'فشل جلب بيانات الشموع من بينانس');
     } finally {
       setIsAnalyzing(false);
     }
-  }, [symbolInput, selectedTimeframeMinutes, entryFeeInput, exitFeeInput, slippageInput]);
+  }, [symbolInput, selectedTimeframeMinutes, entryFeePercentInput, exitFeePercentInput, slippagePercentInput, tradeCapitalInput, savedCoins]);
 
   // Auto-run analysis once on initial load for default symbol
   const hasRunInitialRef = useRef(false);
@@ -195,24 +318,33 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
   const handleAddAnalyzedToMonitoring = () => {
     if (!currentAnalysis) return;
 
-    // Check if already in tracking
     const existingIndex = trades.findIndex(
       (t) => t.binanceSymbol === currentAnalysis.binanceSymbol && t.status !== 'closed'
     );
 
+    const tradeCap = currentAnalysis.tradeCapitalUsdt || 100;
+
     if (existingIndex >= 0) {
-      // Update existing
       const next = [...trades];
       next[existingIndex] = {
         ...next[existingIndex],
         timeframeMinutes: currentAnalysis.timeframeMinutes,
         troughPrice: currentAnalysis.troughPrice,
         peakPrice: currentAnalysis.peakPrice,
+        breakEvenPrice: currentAnalysis.breakEvenPrice,
+        tradeCapitalUsdt: tradeCap,
         grossSpreadPercent: currentAnalysis.grossSpreadPercent,
+        grossSpreadUsdt: currentAnalysis.grossSpreadUsdt,
         netMarginPercent: currentAnalysis.netExpectedMarginPercent,
+        netMarginUsdt: currentAnalysis.netExpectedMarginUsdt,
         entryFeePercent: currentAnalysis.entryFeePercent,
+        entryFeeUsdt: currentAnalysis.entryFeeUsdt,
         exitFeePercent: currentAnalysis.exitFeePercent,
+        exitFeeUsdt: currentAnalysis.exitFeeUsdt,
         slippagePercent: currentAnalysis.slippagePercent,
+        slippageUsdt: currentAnalysis.slippageUsdt,
+        totalCostPercent: currentAnalysis.totalCostPercent,
+        totalCostUsdt: currentAnalysis.totalCostUsdt,
       };
       persistTrades(next);
       return;
@@ -227,14 +359,24 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
       createdAt: Date.now(),
       isActive: true,
       alertsEnabled: false, // مغلق افتراضياً كما طلب المستخدم صراحة
+      alertConfig: { ...DEFAULT_RANGE_ALERT_CONFIG, enabled: false },
       notifyOnOldTroughReturn: false,
+      tradeCapitalUsdt: tradeCap,
       troughPrice: currentAnalysis.troughPrice,
       peakPrice: currentAnalysis.peakPrice,
+      breakEvenPrice: currentAnalysis.breakEvenPrice,
       grossSpreadPercent: currentAnalysis.grossSpreadPercent,
+      grossSpreadUsdt: currentAnalysis.grossSpreadUsdt,
       entryFeePercent: currentAnalysis.entryFeePercent,
+      entryFeeUsdt: currentAnalysis.entryFeeUsdt,
       exitFeePercent: currentAnalysis.exitFeePercent,
+      exitFeeUsdt: currentAnalysis.exitFeeUsdt,
       slippagePercent: currentAnalysis.slippagePercent,
+      slippageUsdt: currentAnalysis.slippageUsdt,
+      totalCostPercent: currentAnalysis.totalCostPercent,
+      totalCostUsdt: currentAnalysis.totalCostUsdt,
       netMarginPercent: currentAnalysis.netExpectedMarginPercent,
+      netMarginUsdt: currentAnalysis.netExpectedMarginUsdt,
     };
 
     const next = [newTrade, ...trades];
@@ -252,52 +394,41 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     persistTrades(next);
   };
 
-  const handleToggleActive = (id: string) => {
+  const handleToggleTradeActive = (id: string) => {
+    const next = trades.map((t) => (t.id === id ? { ...t, isActive: t.isActive === false } : t));
+    persistTrades(next);
+  };
+
+  const handleToggleTradeAlerts = (id: string) => {
     const next = trades.map((t) => {
       if (t.id === id) {
-        return { ...t, isActive: t.isActive === false ? true : false };
+        const nextEnabled = !t.alertsEnabled;
+        return { 
+          ...t, 
+          alertsEnabled: nextEnabled,
+          alertConfig: { ...(t.alertConfig || DEFAULT_RANGE_ALERT_CONFIG), enabled: nextEnabled }
+        };
       }
       return t;
     });
     persistTrades(next);
   };
 
-  const handleToggleAlerts = (id: string) => {
-    const next = trades.map((t) => {
-      if (t.id === id) {
-        return { ...t, alertsEnabled: !t.alertsEnabled };
-      }
-      return t;
-    });
+  const handleClearAllActive = () => {
+    const next = trades.filter((t) => t.status === 'closed');
     persistTrades(next);
   };
 
+  // Ledger history handlers
   const handleToggleOldTroughAlert = (id: string) => {
-    const next = trades.map((t) => {
-      if (t.id === id) {
-        return { ...t, notifyOnOldTroughReturn: !t.notifyOnOldTroughReturn };
-      }
-      return t;
-    });
+    const next = trades.map((t) =>
+      t.id === id ? { ...t, notifyOnOldTroughReturn: !t.notifyOnOldTroughReturn } : t
+    );
     persistTrades(next);
   };
 
-  const handleReopenTradeAtTrough = (item: RangeTrackedTrade) => {
-    const reopened: RangeTrackedTrade = {
-      ...item,
-      id: `range_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      status: 'watching_trough',
-      createdAt: Date.now(),
-      isActive: true,
-      alertsEnabled: true,
-      entryPrice: undefined,
-      entryTimestamp: undefined,
-      exitPrice: undefined,
-      exitTimestamp: undefined,
-      realizedPnlUsdt: undefined,
-      realizedPnlPercent: undefined,
-    };
-    const next = [reopened, ...trades];
+  const handleDeleteHistoryItem = (id: string) => {
+    const next = trades.filter((t) => t.id !== id);
     persistTrades(next);
   };
 
@@ -306,19 +437,35 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     persistTrades(next);
   };
 
-  const handleClearAllActive = () => {
-    if (confirm('هل تريد حذف جميع بطاقات المراقبة النشطة الحالية؟')) {
-      const next = trades.filter((t) => t.status === 'closed');
-      persistTrades(next);
-    }
+  const handleReopenTradeAtTrough = (oldTrade: RangeTrackedTrade) => {
+    const reopened: RangeTrackedTrade = {
+      ...oldTrade,
+      id: `range_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      status: 'watching_trough',
+      createdAt: Date.now(),
+      entryPrice: undefined,
+      allocatedUsdt: undefined,
+      coinQuantity: undefined,
+      entryTimestamp: undefined,
+      exitPrice: undefined,
+      exitTimestamp: undefined,
+      realizedGrossPnlUsdt: undefined,
+      realizedNetPnlUsdt: undefined,
+      realizedPnlPercent: undefined,
+      holdingDurationMinutes: undefined,
+    };
+    const next = [reopened, ...trades];
+    persistTrades(next);
   };
 
   // -------------------------------------------------------------
-  // REAL-TIME NOTIFICATION CHECK (عند ملامسة القاع أو القاع القديم)
+  // REAL-TIME SMART NOTIFICATION ENGINE (شروط التنبيه المتعددة)
   // -------------------------------------------------------------
-  const firedAlertsRef = React.useRef<Set<string>>(new Set());
+  const lastAlertTimesRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
+    const now = Date.now();
+
     trades.forEach((trade) => {
       if (trade.isActive === false) return;
       const livePStr = livePrices[trade.binanceSymbol];
@@ -326,21 +473,67 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
       const liveP = parseFloat(livePStr);
       if (isNaN(liveP) || liveP <= 0) return;
 
-      // 1. Trough Alert when watching (Only if alertsEnabled is true)
-      if (trade.status === 'watching_trough' && trade.alertsEnabled && trade.troughPrice > 0) {
-        const distRatio = Math.abs(liveP - trade.troughPrice) / trade.troughPrice;
-        const reachedTrough = liveP <= trade.troughPrice || distRatio <= 0.003; // ضمن 0.3% من القاع
+      const cfg = trade.alertConfig || DEFAULT_RANGE_ALERT_CONFIG;
+      const isAlertActive = trade.alertsEnabled && cfg.enabled;
 
-        const alertKey = `trough_${trade.id}`;
-        if (reachedTrough && !firedAlertsRef.current.has(alertKey)) {
-          firedAlertsRef.current.add(alertKey);
-          if (canTriggerAlert('reboundBounce', trade.id)) {
-            recordAlertTriggered('reboundBounce', trade.id);
-            soundAlert.playBounceAlert();
+      // Helper to check repeat interval
+      const canFire = (conditionKey: string): boolean => {
+        const fullKey = `${trade.id}_${conditionKey}`;
+        const lastTime = lastAlertTimesRef.current.get(fullKey) || 0;
+        if (cfg.repeatMode === 'once') {
+          return lastTime === 0;
+        }
+        const intervalMs = (cfg.repeatIntervalMinutes || 5) * 60 * 1000;
+        return now - lastTime >= intervalMs;
+      };
+
+      const recordFired = (conditionKey: string) => {
+        const fullKey = `${trade.id}_${conditionKey}`;
+        lastAlertTimesRef.current.set(fullKey, now);
+        soundAlert.playTone((cfg.toneId as AlertToneId) || 'celebration');
+      };
+
+      // 1. WATCHING TROUGH ALERTS
+      if (trade.status === 'watching_trough' && isAlertActive) {
+        // A. At Trough (عند القاع بدقة)
+        if (cfg.triggerAtTrough && trade.troughPrice > 0) {
+          const atTrough = liveP <= trade.troughPrice || ((liveP - trade.troughPrice) / trade.troughPrice) <= 0.002;
+          if (atTrough && canFire('at_trough')) {
+            recordFired('at_trough');
             systemNotification.sendNotification({
               title: `🎯 وصل السعر للقاع: ${trade.name}!`,
-              body: `وصل سعر ${trade.name} إلى منطقة القاع العرضي ($${liveP}). صافي الربح المتوقع للصعود: +${trade.netMarginPercent.toFixed(2)}%.`,
-              tag: `range-trough-${trade.id}`,
+              body: `وصل سعر ${trade.name} بدقة لمنطقة القاع ($${liveP}). صافي الربح المتوقع للصعود: +$${trade.netMarginUsdt?.toFixed(2) || '—'} (+${trade.netMarginPercent.toFixed(2)}%). سعر التعادل: $${trade.breakEvenPrice.toFixed(4)}.`,
+              tag: `trough-${trade.id}`,
+              icon: '/pwa-192x192.png',
+              badge: '/icon.svg',
+            });
+          }
+        }
+
+        // B. Near Trough (عند الاقتراب من القاع)
+        if (cfg.triggerNearTrough && trade.troughPrice > 0) {
+          const distPct = ((liveP - trade.troughPrice) / trade.troughPrice) * 100;
+          if (distPct > 0 && distPct <= (cfg.nearTroughPercent || 0.5) && canFire('near_trough')) {
+            recordFired('near_trough');
+            systemNotification.sendNotification({
+              title: `⏳ اقترب السعر من القاع: ${trade.name}!`,
+              body: `السعر الآن ($${liveP}) على بعد ${distPct.toFixed(2)}% فقط من قاع الشراء ($${trade.troughPrice}). تأهب للشراء!`,
+              tag: `near-trough-${trade.id}`,
+              icon: '/pwa-192x192.png',
+              badge: '/icon.svg',
+            });
+          }
+        }
+
+        // C. Bounce Confirmation (تأكيد الارتداد صعوداً من القاع)
+        if (cfg.triggerBounceConfirmation && trade.troughPrice > 0) {
+          const bouncePct = ((liveP - trade.troughPrice) / trade.troughPrice) * 100;
+          if (bouncePct >= (cfg.bounceConfirmationPercent || 0.4) && bouncePct <= ((cfg.bounceConfirmationPercent || 0.4) + 0.5) && canFire('bounce')) {
+            recordFired('bounce');
+            systemNotification.sendNotification({
+              title: `⚡ تأكد الارتداد صعوداً: ${trade.name}!`,
+              body: `ارتد سعر ${trade.name} بنسبة +${bouncePct.toFixed(2)}% فوق القاع ($${trade.troughPrice}). إشارة دخول صاعدة قوية!`,
+              tag: `bounce-${trade.id}`,
               icon: '/pwa-192x192.png',
               badge: '/icon.svg',
             });
@@ -348,33 +541,77 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
         }
       }
 
-      // 2. Old Trough Return Alert on closed items
-      if (trade.status === 'closed' && trade.notifyOnOldTroughReturn && trade.troughPrice > 0) {
-        const distRatio = Math.abs(liveP - trade.troughPrice) / trade.troughPrice;
-        const returned = liveP <= trade.troughPrice || distRatio <= 0.003;
-        const alertKey = `old_trough_${trade.id}`;
-
-        if (returned && !firedAlertsRef.current.has(alertKey)) {
-          firedAlertsRef.current.add(alertKey);
-          if (canTriggerAlert('reboundBounce', `old_${trade.id}`)) {
-            recordAlertTriggered('reboundBounce', `old_${trade.id}`);
-            soundAlert.playTone('chime');
+      // 2. IN-TRADE ALERTS (أثناء الصفقة)
+      if (trade.status === 'in_trade' && isAlertActive) {
+        // A. At Peak (عند القمة بدقة)
+        if (cfg.triggerAtPeak && trade.peakPrice > 0) {
+          if (liveP >= trade.peakPrice && canFire('at_peak')) {
+            recordFired('at_peak');
             systemNotification.sendNotification({
-              title: `🔄 عودة لنفس القاع القديم: ${trade.name}!`,
-              body: `عاد سعر ${trade.name} لملامسة القاع القديم ($${trade.troughPrice}) الذي حققت منه ربحاً سابقاً! فرصة لتكرار الصفقة.`,
-              tag: `range-old-trough-${trade.id}`,
+              title: `🚀 وصل السعر للقمة المستهدفة: ${trade.name}!`,
+              body: `حقق سعر ${trade.name} هدف القمة ($${liveP}). حان وقت جني الأرباح والخروج!`,
+              tag: `peak-${trade.id}`,
               icon: '/pwa-192x192.png',
               badge: '/icon.svg',
             });
           }
+        }
+
+        // B. Near Peak (عند الاقتراب من القمة)
+        if (cfg.triggerNearPeak && trade.peakPrice > 0) {
+          const distPct = ((trade.peakPrice - liveP) / trade.peakPrice) * 100;
+          if (distPct > 0 && distPct <= (cfg.nearPeakPercent || 0.5) && canFire('near_peak')) {
+            recordFired('near_peak');
+            systemNotification.sendNotification({
+              title: `✨ اقترب السعر من القمة: ${trade.name}!`,
+              body: `السعر الآن ($${liveP}) على بعد ${distPct.toFixed(2)}% فقط من قمة البيع ($${trade.peakPrice}). استعد لجني الأرباح.`,
+              tag: `near-peak-${trade.id}`,
+              icon: '/pwa-192x192.png',
+              badge: '/icon.svg',
+            });
+          }
+        }
+      }
+
+      // 3. CUSTOM PRICE ALERT (سعر مخصص يحدده المستخدم)
+      if (isAlertActive && cfg.triggerCustomPrice && cfg.customPrice && cfg.customPrice > 0) {
+        const diffRatio = Math.abs(liveP - cfg.customPrice) / cfg.customPrice;
+        if (diffRatio <= 0.002 && canFire('custom_price')) {
+          recordFired('custom_price');
+          systemNotification.sendNotification({
+            title: `🔔 وصل السعر المخصص: ${trade.name}!`,
+            body: `وصل سعر ${trade.name} إلى السعر المخصص الذي حددته يدويًا ($${cfg.customPrice}).`,
+            tag: `custom-${trade.id}`,
+            icon: '/pwa-192x192.png',
+            badge: '/icon.svg',
+          });
+        }
+      }
+
+      // 4. OLD TROUGH RETURN ALERT (للصفقات المنتهية)
+      if (trade.status === 'closed' && trade.notifyOnOldTroughReturn && trade.troughPrice > 0) {
+        const distRatio = Math.abs(liveP - trade.troughPrice) / trade.troughPrice;
+        if (distRatio <= 0.003 && canFire('old_trough')) {
+          recordFired('old_trough');
+          systemNotification.sendNotification({
+            title: `🔄 عودة لنفس القاع القديم: ${trade.name}!`,
+            body: `عاد سعر ${trade.name} لملامسة القاع القديم ($${trade.troughPrice}) الذي حققت منه ربحاً سابقاً! فرصة ممتازة لتكرار الصفقة.`,
+            tag: `old-trough-${trade.id}`,
+            icon: '/pwa-192x192.png',
+            badge: '/icon.svg',
+          });
         }
       }
     });
   }, [trades, livePrices]);
 
-  // Filtered active trades
+  // Active trades and closed trades
   const activeTrades = useMemo(() => {
     return trades.filter((t) => t.status !== 'closed');
+  }, [trades]);
+
+  const closedTrades = useMemo(() => {
+    return trades.filter((t) => t.status === 'closed');
   }, [trades]);
 
   const filteredActiveTrades = useMemo(() => {
@@ -387,176 +624,229 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     return activeTrades;
   }, [activeTrades, activeFilter]);
 
-  const closedTrades = useMemo(() => {
-    return trades.filter((t) => t.status === 'closed');
-  }, [trades]);
+  // Filtered coins based on sector tabs and search input
+  const displayedCoinList = useMemo(() => {
+    const q = searchFilter.trim().toUpperCase();
 
-  // Combined imported symbols
-  const importedCoins = useMemo(() => {
-    const list = [...watchlistSymbols, ...trackerSymbols];
-    return Array.from(new Set(list)).filter(Boolean);
-  }, [watchlistSymbols, trackerSymbols]);
+    // 1. Tab: All Binance Pairs
+    if (activeSectorTab === 'all_binance') {
+      if (!q) return binanceTickers.slice(0, 30).map((t) => t.baseAsset);
+      return binanceTickers
+        .filter((t) => t.baseAsset.includes(q))
+        .slice(0, 40)
+        .map((t) => t.baseAsset);
+    }
+
+    // 2. Tab: Saved Coins
+    if (activeSectorTab === 'saved') {
+      if (!q) return savedCoins;
+      return savedCoins.filter((s) => s.includes(q));
+    }
+
+    // 3. Tab: Watchlist import
+    if (activeSectorTab === 'watchlist') {
+      const symbols = watchlistSymbols.map((s) => s.replace('USDT', ''));
+      if (!q) return symbols;
+      return symbols.filter((s) => s.includes(q));
+    }
+
+    // 4. Tab: Tracker import
+    if (activeSectorTab === 'tracker') {
+      const symbols = trackerSymbols.map((s) => s.replace('USDT', ''));
+      if (!q) return symbols;
+      return symbols.filter((s) => s.includes(q));
+    }
+
+    // 5. Standard Sector Presets
+    const preset = SECTOR_PRESETS.find((p) => p.id === activeSectorTab);
+    const baseList = preset ? preset.symbols : [];
+    if (!q) return baseList;
+    return baseList.filter((s) => s.includes(q));
+  }, [activeSectorTab, searchFilter, binanceTickers, savedCoins, watchlistSymbols, trackerSymbols]);
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-2 sm:px-4 py-3" dir="rtl">
-      {/* 1. TOP HEADER & ZERO-FRICTION NAVIGATION BAR */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-4 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+    <div className="w-full max-w-7xl flex flex-col space-y-5 animate-fade-in" dir="rtl">
+      {/* 1. TOP HEADER & SCREEN IDENTITY */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 sm:p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur-md shadow-xs">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500 shadow-sm">
-            <Layers className="w-6 h-6 animate-pulse" />
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/25">
+            <Layers className="w-6 h-6 stroke-[2.2]" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 tracking-tight">
-                صائد القيعان والمسار العرضي
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                صائد القيعان والمسار العرضي (Range Master)
               </h1>
-              <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
-                Range Master
+              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-400/15 text-amber-600 dark:text-amber-400 border border-amber-400/30">
+                1m شموع الدقيقة
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              رصد آلي للقيعان والقمم الأفقية بدقة شموع الدقيقة (1m) وحساب مسبق لصافي الربح بعد الرسوم والانزلاق
+              رصد آلي للمسارات العرضية • حساب سعر التعادل • إدخال التكاليف (% و $) • تنبيهات ذكية متعددة الحالات
             </p>
           </div>
         </div>
 
-        {/* FAST HOP NAVIGATION TO OTHER SCREENS */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Quick Hop: Calculator */}
-          <button
-            type="button"
-            onClick={() => onNavigateToCalculator('', '')}
-            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-amber-500/15 text-slate-700 dark:text-slate-300 hover:text-amber-500 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
-            title="الانتقال إلى حاسبة التعادل"
-          >
-            <Calculator className="w-4 h-4 text-amber-500" />
-            <span>حاسبة التعادل</span>
-          </button>
-
-          {/* Quick Hop: Scalper */}
-          <button
-            type="button"
-            onClick={() => onNavigateToScalper()}
-            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-amber-500/15 text-slate-700 dark:text-slate-300 hover:text-amber-500 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
-            title="الانتقال إلى شاشة السكالبينج"
-          >
-            <Zap className="w-4 h-4 text-emerald-500" />
-            <span>السكالبينج</span>
-          </button>
-
-          {/* Quick Hop: Tracker */}
-          <button
-            type="button"
-            onClick={() => onNavigateToTracker()}
-            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-amber-500/15 text-slate-700 dark:text-slate-300 hover:text-amber-500 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
-            title="الانتقال إلى شاشة رصد الصعود"
-          >
-            <TrendingUp className="w-4 h-4 text-blue-500" />
-            <span>رصد الصعود</span>
-          </button>
-
-          {/* Quick Hop: Watchlist */}
-          <button
-            type="button"
-            onClick={onNavigateToWatchlist}
-            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-amber-500/15 text-slate-700 dark:text-slate-300 hover:text-amber-500 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
-            title="الانتقال إلى قائمة المراقبة"
-          >
-            <LayoutList className="w-4 h-4 text-purple-500" />
-            <span>قائمة المراقبة</span>
-          </button>
-
-          {/* Theme customizer */}
-          <button
-            type="button"
-            onClick={onOpenThemeCustomizer}
-            className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
-            title="ألوان وثيمات التطبيق"
-          >
-            <Palette className="w-4 h-4 text-amber-500" />
-          </button>
-
-          {/* Live Stream Toggle */}
+        {/* Live WebSocket status and quick hops */}
+        <div className="flex items-center flex-wrap gap-2">
+          {/* Binance Stream Toggle */}
           <button
             type="button"
             onClick={() => onToggleLiveStream(!isLiveStreamActive)}
-            className={`flex items-center gap-2 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
               isLiveStreamActive
-                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
-                : 'bg-rose-500/15 border-rose-500/40 text-rose-500'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-500'
             }`}
+            title="حالة بث أسعار بينانس المباشرة"
           >
             <Radio className={`w-3.5 h-3.5 ${isLiveStreamActive ? 'animate-pulse text-emerald-500' : ''}`} />
-            <span>{isLiveStreamActive ? 'بث متصل' : 'البث متوقف'}</span>
+            <span>{isLiveStreamActive ? 'البث الموحد نشط' : 'البث متوقف'}</span>
+          </button>
+
+          {/* Quick Hops to Other Screens */}
+          <button
+            type="button"
+            onClick={() => onNavigateToScalper()}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition cursor-pointer"
+          >
+            <Zap className="w-3.5 h-3.5 text-emerald-500" />
+            <span className="hidden sm:inline">السكالبينج</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateToTracker()}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition cursor-pointer"
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-cyan-500" />
+            <span className="hidden sm:inline">رصد الصعود</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onNavigateToWatchlist}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition cursor-pointer"
+          >
+            <LayoutList className="w-3.5 h-3.5 text-amber-500" />
+            <span className="hidden sm:inline">المراقبة</span>
           </button>
         </div>
       </div>
 
-      {/* 2. SECTOR PRESETS & COIN DISCOVERY RIBBON */}
-      <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-4 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs mb-4">
+      {/* 2. COIN DISCOVERY & SEARCH BAR (بحث شامل في كل أزواج بينانس والقطاعات) */}
+      <div className="p-4 sm:p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-amber-500" />
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              استكشاف قطاعات العملات ذات التذبذب العرضي:
-            </span>
+            <Compass className="w-4 h-4 text-amber-500" />
+            <h2 className="text-xs sm:text-sm font-black text-slate-900 dark:text-slate-100">
+              استكشاف العملات والقطاعات (جميع أزواج بينانس USDT)
+            </h2>
+            {isLoadingTickers && (
+              <span className="text-[10px] text-amber-500 animate-pulse font-mono">
+                جاري تحديث القائمة...
+              </span>
+            )}
           </div>
 
-          {/* Sector Tabs */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
-            {SECTOR_PRESETS.map((sec) => (
-              <button
-                key={sec.id}
-                type="button"
-                onClick={() => setActiveSectorTab(sec.id)}
-                className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-                  activeSectorTab === sec.id
-                    ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                {sec.name}
-              </button>
-            ))}
-
-            {importedCoins.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setActiveSectorTab('imported')}
-                className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-                  activeSectorTab === 'imported'
-                    ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                مستوردة ({importedCoins.length})
-              </button>
-            )}
+          {/* Quick Search within the sector/all coins */}
+          <div className="relative w-full sm:w-64">
+            <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="ابحث عن أي عملة (مثال: PEPE, SUI, SOL)..."
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              className="w-full pr-8 pl-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-amber-500"
+            />
           </div>
         </div>
 
-        {/* Quick Sector Coins Pills */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {activeSectorTab === 'imported' ? (
-            importedCoins.map((sym) => (
-              <button
-                key={sym}
-                type="button"
-                onClick={() => {
-                  setSymbolInput(sym);
-                  handleRunAnalysis(sym);
-                }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition border cursor-pointer ${
-                  symbolInput === sym
-                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 font-black'
-                    : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-500'
-                }`}
-              >
-                {sym}
-              </button>
-            ))
+        {/* Sector Tabs Bar */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-3 scrollbar-none">
+          {/* Tab: All Binance */}
+          <button
+            type="button"
+            onClick={() => setActiveSectorTab('all_binance')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+              activeSectorTab === 'all_binance'
+                ? 'bg-amber-400 text-slate-950 font-black shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>جميع عملات بينانس ({binanceTickers.length || '300+'})</span>
+          </button>
+
+          {/* Sector Presets */}
+          {SECTOR_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => setActiveSectorTab(preset.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                activeSectorTab === preset.id
+                  ? 'bg-amber-400 text-slate-950 font-black shadow-xs'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <span>{preset.name}</span>
+            </button>
+          ))}
+
+          {/* Tab: Saved Coins */}
+          <button
+            type="button"
+            onClick={() => setActiveSectorTab('saved')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+              activeSectorTab === 'saved'
+                ? 'bg-amber-400 text-slate-950 font-black shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Bookmark className="w-3.5 h-3.5" />
+            <span>المحفوظة ({savedCoins.length})</span>
+          </button>
+
+          {/* Tab: Watchlist import */}
+          {watchlistSymbols.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveSectorTab('watchlist')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                activeSectorTab === 'watchlist'
+                  ? 'bg-amber-400 text-slate-950 font-black shadow-xs'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <span>قائمة المراقبة ({watchlistSymbols.length})</span>
+            </button>
+          )}
+
+          {/* Tab: Tracker import */}
+          {trackerSymbols.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveSectorTab('tracker')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                activeSectorTab === 'tracker'
+                  ? 'bg-amber-400 text-slate-950 font-black shadow-xs'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <span>رصد الصعود ({trackerSymbols.length})</span>
+            </button>
+          )}
+        </div>
+
+        {/* Coin Chips Grid */}
+        <div className="flex flex-wrap items-center gap-1.5 max-h-36 overflow-y-auto pr-1">
+          {displayedCoinList.length === 0 ? (
+            <div className="text-xs text-slate-500 py-3">
+              لا توجد عملات تطابق البحث. يمكنك كتابة أي رمز أعلاه لتحليله فوراً.
+            </div>
           ) : (
-            SECTOR_PRESETS.find((s) => s.id === activeSectorTab)?.symbols.map((sym) => (
+            displayedCoinList.map((sym) => (
               <button
                 key={sym}
                 type="button"
@@ -566,7 +856,7 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
                 }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition border cursor-pointer ${
                   symbolInput === sym
-                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 font-black'
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 font-black shadow-xs'
                     : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-500'
                 }`}
               >
@@ -577,20 +867,20 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
         </div>
       </div>
 
-      {/* 3. ANALYSIS CONFIGURATION & PREVIEW ROW */}
+      {/* 3. ANALYSIS CONFIGURATION & DUAL COSTS INPUTS ($ and %) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-4">
-        {/* Left/Middle: Analysis Config Panel */}
+        {/* Left: Input Parameters Panel */}
         <div className="lg:col-span-5 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-4 sm:p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200/80 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-cyan-500" />
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  معايير التحليل الدقيق (شموع الدقيقة 1m)
+                  إعدادات التحليل والتكاليف (نسبة % ومبلغ $)
                 </span>
               </div>
               <span className="text-[11px] font-mono text-slate-400">
-                Binance Klines API
+                1m Klines API
               </span>
             </div>
 
@@ -598,7 +888,7 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                  رمز العملة المراد فحصها
+                  رمز العملة (يمكن كتابة أي عملة)
                 </label>
                 <div className="relative">
                   <input
@@ -634,150 +924,225 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
               </div>
             </div>
 
-            {/* Manual Costs Input (Fees + Slippage) */}
+            {/* Trade Capital Input ($ USDT) */}
+            <div className="p-2.5 rounded-xl bg-slate-100/70 dark:bg-slate-800/50 mb-3 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 block">
+                  رأس المال المقترح للصفقة ($ USDT)
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  تُحسب المبالغ النقدية لجميع التكاليف والأرباح بناءً عليه
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  step="1"
+                  min="1"
+                  value={tradeCapitalInput}
+                  onChange={(e) => setTradeCapitalInput(e.target.value)}
+                  className="w-20 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                />
+                <span className="text-xs font-bold text-slate-500">$</span>
+              </div>
+            </div>
+
+            {/* Dual Costs Inputs (Both % and $ Fields) */}
             <div className="p-3 rounded-2xl bg-slate-100/60 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 mb-3">
-              <span className="text-[10px] font-bold text-slate-500 block mb-1.5">
-                إدخال التكاليف يدوياً لخصمها من هامش الربح:
+              <span className="text-[10px] font-bold text-slate-500 block mb-2">
+                إدخال التكاليف يدوياً (حقل للنسبة % وحقل للمبلغ $ متزامنان):
               </span>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-[10px] text-slate-400 block mb-0.5">رسوم الشراء %</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={entryFeeInput}
-                    onChange={(e) => {
-                      setEntryFeeInput(e.target.value);
-                      persistCosts(e.target.value, exitFeeInput, slippageInput);
-                    }}
-                    className="w-full px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold text-center"
-                  />
+
+              <div className="space-y-2">
+                {/* Entry Fee Row */}
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">رسوم الشراء:</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={entryFeePercentInput}
+                        onChange={(e) => handleUpdateFeePercent('entry', e.target.value)}
+                        className="w-16 px-1.5 py-0.5 text-xs font-mono font-bold text-center rounded-md bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                      />
+                      <span className="text-[10px] font-bold text-slate-500">%</span>
+                    </div>
+                    <span className="text-slate-400">=</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={entryFeeUsdtInput}
+                        onChange={(e) => handleUpdateFeeUsdt('entry', e.target.value)}
+                        className="w-16 px-1.5 py-0.5 text-xs font-mono font-bold text-center rounded-md bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                      />
+                      <span className="text-[10px] font-bold text-slate-500">$</span>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] text-slate-400 block mb-0.5">رسوم البيع %</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={exitFeeInput}
-                    onChange={(e) => {
-                      setExitFeeInput(e.target.value);
-                      persistCosts(entryFeeInput, e.target.value, slippageInput);
-                    }}
-                    className="w-full px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold text-center"
-                  />
+
+                {/* Exit Fee Row */}
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">رسوم البيع:</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={exitFeePercentInput}
+                        onChange={(e) => handleUpdateFeePercent('exit', e.target.value)}
+                        className="w-16 px-1.5 py-0.5 text-xs font-mono font-bold text-center rounded-md bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                      />
+                      <span className="text-[10px] font-bold text-slate-500">%</span>
+                    </div>
+                    <span className="text-slate-400">=</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={exitFeeUsdtInput}
+                        onChange={(e) => handleUpdateFeeUsdt('exit', e.target.value)}
+                        className="w-16 px-1.5 py-0.5 text-xs font-mono font-bold text-center rounded-md bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                      />
+                      <span className="text-[10px] font-bold text-slate-500">$</span>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] text-slate-400 block mb-0.5">انزلاق سعري %</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={slippageInput}
-                    onChange={(e) => {
-                      setSlippageInput(e.target.value);
-                      persistCosts(entryFeeInput, exitFeeInput, e.target.value);
-                    }}
-                    className="w-full px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold text-center"
-                  />
+
+                {/* Slippage Row */}
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">الانزلاق السعري:</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={slippagePercentInput}
+                        onChange={(e) => handleUpdateFeePercent('slippage', e.target.value)}
+                        className="w-16 px-1.5 py-0.5 text-xs font-mono font-bold text-center rounded-md bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                      />
+                      <span className="text-[10px] font-bold text-slate-500">%</span>
+                    </div>
+                    <span className="text-slate-400">=</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={slippageUsdtInput}
+                        onChange={(e) => handleUpdateFeeUsdt('slippage', e.target.value)}
+                        className="w-16 px-1.5 py-0.5 text-xs font-mono font-bold text-center rounded-md bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                      />
+                      <span className="text-[10px] font-bold text-slate-500">$</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
+
+            {/* Error Message */}
+            {analysisError && (
+              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs flex items-center gap-1.5 mb-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{analysisError}</span>
+              </div>
+            )}
           </div>
 
+          {/* Trigger Analysis Button */}
           <button
             type="button"
             onClick={() => handleRunAnalysis()}
             disabled={isAnalyzing}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition cursor-pointer shadow-xs disabled:opacity-50"
+            className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs transition cursor-pointer shadow-md shadow-cyan-500/20 disabled:opacity-60"
           >
             <RefreshCw className={`w-4 h-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
-            <span>{isAnalyzing ? 'جاري فحص الشموع...' : `تحليل قيعان وقمم ${symbolInput} الآن`}</span>
+            <span>{isAnalyzing ? 'جاري فحص شموع الدقيقة...' : 'فحص القناة العرضية وحساب الأرباح'}</span>
           </button>
         </div>
 
-        {/* Right: Live Mathematical Analysis Result Preview */}
+        {/* Right: Live Mathematical Analysis Result Preview (مع سعر التعادل والقيم المزدوجة) */}
         <div className="lg:col-span-7 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-4 sm:p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200/80 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  نتيجة التحليل الرياضي للقناة العرضية
+                  نتيجة التحليل الرياضي وسعر التعادل
                 </span>
               </div>
               {currentAnalysis && (
                 <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
                   currentAnalysis.isViable
-                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-400'
+                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
+                    : 'bg-rose-500/15 border-rose-500/30 text-rose-500'
                 }`}>
-                  {currentAnalysis.isViable ? '✅ فرصة مجدية بعد التكاليف' : '⚠️ الهامش ضعيف بعد الرسوم'}
+                  {currentAnalysis.isViable ? '✅ صفقة مجدية اقتصادياً' : '⚠️ الهامش لا يغطي التكاليف'}
                 </span>
               )}
             </div>
 
-            {analysisError ? (
-              <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{analysisError}</span>
-              </div>
-            ) : currentAnalysis ? (
+            {currentAnalysis ? (
               <div className="space-y-3">
-                {/* Metrics Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  <div className="p-2.5 rounded-xl bg-slate-100/60 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800/60">
-                    <span className="text-[10px] text-slate-500 block mb-0.5">أدنى قاع مرصود</span>
-                    <span className="text-sm sm:text-base font-black font-mono text-emerald-500">
-                      ${trimTrailingZeros(currentAnalysis.troughPrice.toString())}
+                {/* Four Metrics: Trough, Peak, Break-Even, Net Margin */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="p-2.5 rounded-xl bg-slate-100/70 dark:bg-slate-800/50">
+                    <span className="text-[10px] text-slate-400 block mb-0.5">القاع المرصود (شراء)</span>
+                    <span className="text-xs sm:text-sm font-black font-mono text-emerald-500">
+                      ${currentAnalysis.troughPrice}
                     </span>
-                    <span className="text-[9px] text-slate-400 block mt-0.5">
-                      ({currentAnalysis.troughTouchesCount} ملامسة للقاع)
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-100/60 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800/60">
-                    <span className="text-[10px] text-slate-500 block mb-0.5">أعلى قمة مرصودة</span>
-                    <span className="text-sm sm:text-base font-black font-mono text-rose-500">
-                      ${trimTrailingZeros(currentAnalysis.peakPrice.toString())}
-                    </span>
-                    <span className="text-[9px] text-slate-400 block mt-0.5">
-                      ({currentAnalysis.peakTouchesCount} ملامسة للقمة)
+                    <span className="text-[9px] text-slate-500 block mt-0.5">
+                      (تكرار اللمس: {currentAnalysis.troughTouchesCount} مرات)
                     </span>
                   </div>
 
-                  <div className="p-2.5 rounded-xl bg-slate-100/60 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800/60">
-                    <span className="text-[10px] text-slate-500 block mb-0.5">نطاق القناة الإجمالي</span>
-                    <span className="text-sm sm:text-base font-black font-mono text-slate-900 dark:text-slate-100">
-                      +{currentAnalysis.grossSpreadPercent.toFixed(2)}%
+                  <div className="p-2.5 rounded-xl bg-slate-100/70 dark:bg-slate-800/50">
+                    <span className="text-[10px] text-slate-400 block mb-0.5">القمة المرصودة (بيع)</span>
+                    <span className="text-xs sm:text-sm font-black font-mono text-cyan-400">
+                      ${currentAnalysis.peakPrice}
                     </span>
-                    <span className="text-[9px] text-slate-400 block mt-0.5">
-                      (رسوم: -{currentAnalysis.totalCostPercent.toFixed(2)}%)
+                    <span className="text-[9px] text-slate-500 block mt-0.5">
+                      (تكرار اللمس: {currentAnalysis.peakTouchesCount} مرات)
                     </span>
                   </div>
 
-                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block mb-0.5">صافي الربح المتوقع</span>
-                    <span className="text-sm sm:text-base font-black font-mono text-emerald-500">
-                      +{currentAnalysis.netExpectedMarginPercent.toFixed(2)}%
+                  {/* Break-Even Price Highlight (الملاحظة 3) */}
+                  <div className="p-2.5 rounded-xl bg-amber-400/15 border border-amber-400/40">
+                    <span className="text-[10px] text-amber-700 dark:text-amber-400 font-bold block mb-0.5">سعر التعادل (Break-Even)</span>
+                    <span className="text-xs sm:text-sm font-black font-mono text-amber-600 dark:text-amber-300">
+                      ${currentAnalysis.breakEvenPrice.toFixed(4)}
                     </span>
-                    <span className="text-[9px] text-emerald-600/70 block mt-0.5">
-                      (بعد خصم كافة التكاليف)
+                    <span className="text-[9px] text-amber-600/80 block mt-0.5">
+                      (بعد كافة التكاليف: -${currentAnalysis.totalCostUsdt.toFixed(2)})
+                    </span>
+                  </div>
+
+                  {/* Net Margin (الملاحظة 4: مبلغ ونسبة) */}
+                  <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30">
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold block mb-0.5">صافي الربح المتوقع</span>
+                    <span className="text-xs sm:text-sm font-black font-mono text-emerald-500">
+                      +${currentAnalysis.netExpectedMarginUsdt.toFixed(2)} USDT
+                    </span>
+                    <span className="text-[9px] text-emerald-600/80 block mt-0.5 font-bold">
+                      +{currentAnalysis.netExpectedMarginPercent.toFixed(2)}% صافي
                     </span>
                   </div>
                 </div>
 
-                {/* Analysis note & quick chart view */}
-                <div className="p-3 rounded-xl bg-slate-100/70 dark:bg-slate-800/50 flex items-center justify-between text-xs">
+                {/* Extended Details Banner: Total Spread & Costs */}
+                <div className="p-3 rounded-2xl bg-slate-100/60 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div>
                     <span className="text-slate-700 dark:text-slate-300 font-bold block">
                       فحص {currentAnalysis.candlesCount} شمعة دقيقة (1m) لـ {currentAnalysis.symbol}
                     </span>
                     <span className="text-[11px] text-slate-500">
-                      السعر الحالي يبعد بنسبة {currentAnalysis.distanceToTroughPercent.toFixed(2)}% عن القاع
+                      فارق القناة الخام: +${currentAnalysis.grossSpreadUsdt.toFixed(2)} (+{currentAnalysis.grossSpreadPercent.toFixed(2)}%) • إجمالي التكاليف: -${currentAnalysis.totalCostUsdt.toFixed(2)} (-{currentAnalysis.totalCostPercent.toFixed(2)}%)
                     </span>
                   </div>
+
                   <button
                     type="button"
-                    onClick={() => onOpenChart(currentAnalysis.symbol)}
+                    onClick={() => onOpenChart(currentAnalysis.binanceSymbol)}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-700 hover:text-cyan-400 font-bold text-xs transition cursor-pointer"
                   >
                     <TrendingUp className="w-3.5 h-3.5" />
@@ -795,7 +1160,7 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
           {currentAnalysis && (
             <div className="pt-3 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3">
               <span className="text-xs text-slate-500">
-                هل يعجبك هذا المسار العرضي؟ يمكنك إضافته للبطاقات لمراقبة ارتداد القاع لحظياً:
+                هل يعجبك هذا المسار العرضي؟ يمكنك إضافته للبطاقات لمراقبة ارتداد القاع وتفعيل التنبيهات:
               </span>
               <button
                 type="button"
@@ -858,25 +1223,25 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
 
         {filteredActiveTrades.length === 0 ? (
           <div className="text-center py-12 px-4 rounded-3xl border border-dashed border-slate-300 dark:border-slate-800 bg-white/40 dark:bg-slate-900/40">
-            <Layers className="w-10 h-10 mx-auto text-amber-500/40 mb-2" />
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">
-              لا توجد بطاقات مراقبة نشطة حالياً
+            <Layers className="w-10 h-10 text-slate-400 mx-auto mb-2 opacity-50" />
+            <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">
+              لا توجد بطاقات مسار عرضي نشطة
             </h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto mb-3">
-              اختر إحدى العملات من القطاعات أعلاه أو أدخل رمز العملة واضغط «+ إضافة لقائمة المراقبة النشطة».
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              اختر أي عملة من القائمة بالأعلى أو اكتب رمز أي عملة أخرى واضغط على «إضافة لقائمة المراقبة النشطة» لمتابعة سعر التعادل والتنبيهات اللحظية.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredActiveTrades.map((t) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredActiveTrades.map((trade) => (
               <RangeTradeCard
-                key={t.id}
-                trade={t}
-                livePrice={livePrices[t.binanceSymbol]}
+                key={trade.id}
+                trade={trade}
+                livePrice={livePrices[trade.binanceSymbol]}
                 onUpdateTrade={handleUpdateTrade}
                 onDeleteTrade={handleDeleteTrade}
-                onToggleActive={handleToggleActive}
-                onToggleAlerts={handleToggleAlerts}
+                onToggleActive={handleToggleTradeActive}
+                onToggleAlerts={handleToggleTradeAlerts}
                 onOpenChart={onOpenChart}
                 onNavigateToCalculator={onNavigateToCalculator}
                 onNavigateToTracker={onNavigateToTracker}
@@ -887,11 +1252,11 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
         )}
       </div>
 
-      {/* 5. COMPLETED TRADES LEDGER & OLD TROUGH MEMORY */}
+      {/* 5. CLOSED TRADES LEDGER (سجل الصفقات المنتهية والأرباح المحققة وتنبيه القاع القديم) */}
       <RangeTradeLedger
         closedTrades={closedTrades}
         onToggleOldTroughAlert={handleToggleOldTroughAlert}
-        onDeleteHistoryItem={handleDeleteTrade}
+        onDeleteHistoryItem={handleDeleteHistoryItem}
         onClearAllHistory={handleClearAllHistory}
         onReopenTradeAtTrough={handleReopenTradeAtTrough}
         onNavigateToCalculator={onNavigateToCalculator}
