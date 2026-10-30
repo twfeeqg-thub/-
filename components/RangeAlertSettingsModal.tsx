@@ -1,16 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { RangeAlertConfig, DEFAULT_RANGE_ALERT_CONFIG } from '@/types/rangeScalper';
-import { soundAlert, ALERT_TONE_OPTIONS, AlertToneId } from '@/lib/soundAlert';
+import { AlertToneId } from '@/lib/soundAlert';
+import { SoundToneSelector } from './SoundToneSelector';
 import { 
   Bell, 
   BellOff, 
   X, 
   Check, 
-  Volume2, 
   Radio, 
-  Sliders, 
   ArrowUpRight, 
   ArrowDownRight, 
   RotateCw, 
@@ -30,8 +30,7 @@ interface RangeAlertSettingsModalProps {
   onSaveConfig: (newConfig: RangeAlertConfig) => void;
 }
 
-export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = ({
-  isOpen,
+const RangeAlertSettingsModalContent: React.FC<Omit<RangeAlertSettingsModalProps, 'isOpen'>> = ({
   onClose,
   currencyName,
   binanceSymbol,
@@ -55,13 +54,18 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
   const [customPrice, setCustomPrice] = useState<string>(initialConfig.customPrice ? initialConfig.customPrice.toString() : '');
   const [repeatMode, setRepeatMode] = useState<'once' | 'continuous'>(initialConfig.repeatMode);
   const [repeatIntervalMinutes, setRepeatIntervalMinutes] = useState<number>(initialConfig.repeatIntervalMinutes || 5);
-  const [selectedTone, setSelectedTone] = useState<AlertToneId>((initialConfig.toneId as AlertToneId) || 'celebration');
+  const [selectedTone, setSelectedTone] = useState<AlertToneId>((initialConfig.toneId as AlertToneId) || 'system');
 
-  if (!isOpen) return null;
-
-  const handleTestTone = (tone: AlertToneId) => {
-    soundAlert.playTone(tone);
-  };
+  // Close on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const handleSave = () => {
     const config: RangeAlertConfig = {
@@ -89,34 +93,34 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
   const bouncePriceEstimate = troughPrice * (1 + (bounceConfirmationPercent / 100));
   const nearPeakPriceEstimate = peakPrice * (1 - (nearPeakPercent / 100));
 
-  return (
+  const modalContent = (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in"
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto animate-fade-in"
       dir="rtl"
       onClick={onClose}
     >
       <div 
-        className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="relative w-full max-w-lg my-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh] sm:max-h-[85vh] animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* MODAL HEADER */}
-        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/80">
-          <div className="flex items-center gap-2.5">
-            <div className={`w-9 h-9 rounded-2xl flex items-center justify-center font-bold ${
+        {/* MODAL HEADER - Always pinned at top */}
+        <div className="flex-shrink-0 flex items-center justify-between p-3.5 sm:p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/95 dark:bg-slate-900/95 sticky top-0 z-20">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-2xl flex items-center justify-center font-bold flex-shrink-0 ${
               enabled ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/20' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
             }`}>
-              <Bell className="w-5 h-5" />
+              <Bell className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-black text-slate-900 dark:text-slate-100">
-                  إعدادات التنبيه الذكي لـ {currencyName}
+            <div className="truncate">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100 truncate">
+                  تنبيهات {currencyName}
                 </h3>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold">
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold">
                   {binanceSymbol}
                 </span>
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] text-slate-500 hidden sm:block">
                 تحديد حالات وشروط التنبيه بدقة عند القاع والقمة
               </p>
             </div>
@@ -124,27 +128,32 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
 
           <button
             type="button"
-            onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition cursor-pointer flex-shrink-0"
+            aria-label="إغلاق النافذة"
+            title="إغلاق"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 stroke-[2.5]" />
           </button>
         </div>
 
         {/* MODAL BODY (SCROLLABLE) */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-4">
+        <div className="p-4 sm:p-5 overflow-y-auto overscroll-contain touch-pan-y space-y-3.5 flex-1 text-xs">
           {/* 1. MASTER TOGGLE (مفتاح التفعيل الرئيسي) */}
-          <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex items-center justify-between">
+          <div className="p-3 sm:p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">
-              <div className={`p-2 rounded-xl ${enabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'}`}>
+              <div className={`p-2 rounded-xl flex-shrink-0 ${enabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'}`}>
                 {enabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
               </div>
               <div>
                 <span className="text-xs font-bold text-slate-900 dark:text-slate-100 block">
-                  الحالة العامة للتنبيه
+                  مفتاح التنبيه الذكي للعملة
                 </span>
-                <span className="text-[11px] text-slate-500">
-                  {enabled ? 'التنبيهات مفعلة وستنطلق عند تحقق الشروط المحددة' : 'التنبيهات معطلة ومغلقة افتراضياً'}
+                <span className="text-[11px] text-slate-500 block">
+                  {enabled ? 'تنبيهات العملة تعمل وتراقب السوق' : 'التنبيهات متوقفة حالياً'}
                 </span>
               </div>
             </div>
@@ -152,7 +161,7 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
             <button
               type="button"
               onClick={() => setEnabled(!enabled)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer flex-shrink-0 ${
                 enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'
               }`}
             >
@@ -164,27 +173,27 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
             </button>
           </div>
 
-          {/* 2. TRIGGER CONDITIONS SECTION */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Sliders className="w-3.5 h-3.5 text-amber-500" />
-                شروط وحالات إطلاق التنبيه:
-              </span>
-              <span className="text-[10px] text-slate-500">
-                القاع: ${troughPrice} • القمة: ${peakPrice}
-              </span>
-            </div>
+          {/* 2. TRIGGER CONDITIONS (شروط وحالات التنبيه) */}
+          <div className="space-y-2">
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block mb-1">
+              حالات التنبيه المفعلة:
+            </span>
 
-            <div className="space-y-2">
+            {/* A. DIPS & TROUGHS SECTION (القيعان والدخول) */}
+            <div className="p-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 dark:bg-emerald-500/5 space-y-2">
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                <ArrowDownRight className="w-3.5 h-3.5" />
+                <span>شروط القاع والدخول (الشراء)</span>
+              </span>
+
               {/* Condition 1: عند القاع بدقة */}
-              <label className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition cursor-pointer">
-                <div className="flex items-center gap-2.5">
+              <label className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-850 transition cursor-pointer gap-2">
+                <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     checked={triggerAtTrough}
                     onChange={(e) => setTriggerAtTrough(e.target.checked)}
-                    className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
+                    className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer flex-shrink-0"
                   />
                   <div>
                     <span className="text-xs font-bold text-slate-900 dark:text-slate-100 block">
@@ -195,20 +204,20 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
                     </span>
                   </div>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500">
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 flex-shrink-0">
                   شراء مثالي
                 </span>
               </label>
 
               {/* Condition 2: عند الاقتراب من القاع */}
-              <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="flex items-center gap-2.5 cursor-pointer">
+              <div className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
+                <div className="flex items-center justify-between mb-1.5 gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={triggerNearTrough}
                       onChange={(e) => setTriggerNearTrough(e.target.checked)}
-                      className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
+                      className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer flex-shrink-0"
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-900 dark:text-slate-100 block">
@@ -219,172 +228,172 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
                       </span>
                     </div>
                   </label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      max="10"
-                      value={nearTroughPercent}
-                      onChange={(e) => setNearTroughPercent(parseFloat(e.target.value) || 0.5)}
-                      disabled={!triggerNearTrough}
-                      className="w-16 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 disabled:opacity-50"
-                    />
-                    <span className="text-xs font-bold text-slate-500">%</span>
-                  </div>
+                  <span className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-400 flex-shrink-0">
+                    ~${nearTroughPriceEstimate.toFixed(4)}
+                  </span>
                 </div>
-                {triggerNearTrough && (
-                  <p className="text-[10px] text-slate-400 font-mono pr-7">
-                    ينطلق التنبيه عند وصول السعر إلى: ~${nearTroughPriceEstimate.toFixed(4)} USDT
-                  </p>
-                )}
+                <div className="flex items-center gap-2 pl-6">
+                  <span className="text-[11px] text-slate-500">فارق الاقتراب:</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    max="5"
+                    value={nearTroughPercent}
+                    onChange={(e) => setNearTroughPercent(parseFloat(e.target.value) || 0.5)}
+                    className="w-16 px-2 py-0.5 text-xs font-mono font-bold text-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700"
+                  />
+                  <span className="text-xs text-slate-500 font-bold">% فوق القاع</span>
+                </div>
               </div>
 
-              {/* Condition 3: تأكيد الارتداد صعوداً من القاع */}
-              <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="flex items-center gap-2.5 cursor-pointer">
+              {/* Condition 3: عند تأكيد الارتداد عن القاع */}
+              <div className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
+                <div className="flex items-center justify-between mb-1.5 gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={triggerBounceConfirmation}
                       onChange={(e) => setTriggerBounceConfirmation(e.target.checked)}
-                      className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
+                      className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer flex-shrink-0"
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-900 dark:text-slate-100 block">
-                        تأكيد الارتداد صعوداً بعد القاع (Bounce)
+                        عند تأكيد الارتداد صعوداً من القاع 🚀
                       </span>
                       <span className="text-[10px] text-slate-500">
-                        التأكد من ارتداد السعر وتفادي كسر القاع
+                        تأكيد الصعود بدلاً من اصطياد السكاكين الساقطة
                       </span>
                     </div>
                   </label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      max="10"
-                      value={bounceConfirmationPercent}
-                      onChange={(e) => setBounceConfirmationPercent(parseFloat(e.target.value) || 0.4)}
-                      disabled={!triggerBounceConfirmation}
-                      className="w-16 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 disabled:opacity-50"
-                    />
-                    <span className="text-xs font-bold text-slate-500">%</span>
-                  </div>
+                  <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400 flex-shrink-0">
+                    +${bouncePriceEstimate.toFixed(4)}
+                  </span>
                 </div>
-                {triggerBounceConfirmation && (
-                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono pr-7">
-                    ينطلق التنبيه بعد الارتداد وتخطي سعر: ~${bouncePriceEstimate.toFixed(4)} USDT
-                  </p>
-                )}
+                <div className="flex items-center gap-2 pl-6">
+                  <span className="text-[11px] text-slate-500">نسبة الارتداد:</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    max="5"
+                    value={bounceConfirmationPercent}
+                    onChange={(e) => setBounceConfirmationPercent(parseFloat(e.target.value) || 0.4)}
+                    className="w-16 px-2 py-0.5 text-xs font-mono font-bold text-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700"
+                  />
+                  <span className="text-xs text-slate-500 font-bold">% صعوداً من القاع</span>
+                </div>
               </div>
+            </div>
+
+            {/* B. PEAKS & TARGETS SECTION (القمم وجني الأرباح) */}
+            <div className="p-3 rounded-2xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-500/5 space-y-2">
+              <span className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                <ArrowUpRight className="w-3.5 h-3.5" />
+                <span>شروط القمة والخروج (جني الأرباح)</span>
+              </span>
 
               {/* Condition 4: عند القمة بدقة */}
-              <label className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition cursor-pointer">
-                <div className="flex items-center gap-2.5">
+              <label className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-850 transition cursor-pointer gap-2">
+                <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     checked={triggerAtPeak}
                     onChange={(e) => setTriggerAtPeak(e.target.checked)}
-                    className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
+                    className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer flex-shrink-0"
                   />
                   <div>
                     <span className="text-xs font-bold text-slate-900 dark:text-slate-100 block">
-                      عند وصول القمة المستهدفة بدقة
+                      عند ملامسة القمة المستهدفة بدقة
                     </span>
-                    <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400">
+                    <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400">
                       السعر: ${peakPrice} USDT
                     </span>
                   </div>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-500">
-                  جني ربح
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 flex-shrink-0">
+                  بيع وجني ربح
                 </span>
               </label>
 
               {/* Condition 5: عند الاقتراب من القمة */}
-              <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="flex items-center gap-2.5 cursor-pointer">
+              <div className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
+                <div className="flex items-center justify-between mb-1.5 gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={triggerNearPeak}
                       onChange={(e) => setTriggerNearPeak(e.target.checked)}
-                      className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
+                      className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer flex-shrink-0"
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-900 dark:text-slate-100 block">
-                        عند الاقتراب من القمة (قبل الانعكاس)
+                        عند الاقتراب من القمة (استعداد للخروج)
                       </span>
                       <span className="text-[10px] text-slate-500">
-                        تنبيه قبل القمة للخروج الآمن
+                        تنبيه قبل بلوغ القمة لحماية الأرباح
                       </span>
                     </div>
                   </label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      max="10"
-                      value={nearPeakPercent}
-                      onChange={(e) => setNearPeakPercent(parseFloat(e.target.value) || 0.5)}
-                      disabled={!triggerNearPeak}
-                      className="w-16 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 disabled:opacity-50"
-                    />
-                    <span className="text-xs font-bold text-slate-500">%</span>
-                  </div>
+                  <span className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-400 flex-shrink-0">
+                    ~${nearPeakPriceEstimate.toFixed(4)}
+                  </span>
                 </div>
-                {triggerNearPeak && (
-                  <p className="text-[10px] text-slate-400 font-mono pr-7">
-                    ينطلق التنبيه عند وصول السعر إلى: ~${nearPeakPriceEstimate.toFixed(4)} USDT
-                  </p>
-                )}
+                <div className="flex items-center gap-2 pl-6">
+                  <span className="text-[11px] text-slate-500">فارق الاقتراب:</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    max="5"
+                    value={nearPeakPercent}
+                    onChange={(e) => setNearPeakPercent(parseFloat(e.target.value) || 0.5)}
+                    className="w-16 px-2 py-0.5 text-xs font-mono font-bold text-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700"
+                  />
+                  <span className="text-xs text-slate-500 font-bold">% قبل القمة</span>
+                </div>
               </div>
 
               {/* Condition 6: عند سعر مخصص يدوي */}
-              <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="flex items-center gap-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={triggerCustomPrice}
-                      onChange={(e) => setTriggerCustomPrice(e.target.checked)}
-                      className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
-                    />
-                    <div>
-                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100 block">
-                        تنبيه عند سعر مخصص يدوي
-                      </span>
-                      <span className="text-[10px] text-slate-500">
-                        اكتب أي سعر محدد تفضله
-                      </span>
-                    </div>
-                  </label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="0.00"
-                      value={customPrice}
-                      onChange={(e) => setCustomPrice(e.target.value)}
-                      disabled={!triggerCustomPrice}
-                      className="w-24 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 disabled:opacity-50"
-                    />
-                    <span className="text-xs font-bold text-slate-500">$</span>
+              <div className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={triggerCustomPrice}
+                    onChange={(e) => setTriggerCustomPrice(e.target.checked)}
+                    className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer flex-shrink-0"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-slate-900 dark:text-slate-100 block">
+                      عند سعر يدوي مخصص من قبلك
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      اكتب أي سعر محدد تفضله
+                    </span>
                   </div>
+                </label>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0.00"
+                    value={customPrice}
+                    onChange={(e) => setCustomPrice(e.target.value)}
+                    disabled={!triggerCustomPrice}
+                    className="w-24 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 disabled:opacity-50"
+                  />
+                  <span className="text-xs font-bold text-slate-500">$</span>
                 </div>
               </div>
             </div>
           </div>
 
           {/* 3. REPEAT & FREQUENCY SECTION */}
-          <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40">
+          <div className="p-3 sm:p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40">
             <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block mb-2">
               تكرار إرسال التنبيه:
             </span>
-            <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="grid grid-cols-2 gap-2 mb-2">
               <button
                 type="button"
                 onClick={() => setRepeatMode('once')}
@@ -421,54 +430,33 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
                     min="1"
                     max="60"
                     value={repeatIntervalMinutes}
-                    onChange={(e) => setRepeatIntervalMinutes(Number(e.target.value) || 5)}
-                    className="w-16 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                    onChange={(e) => setRepeatIntervalMinutes(parseInt(e.target.value, 10) || 5)}
+                    className="w-16 px-2 py-0.5 text-xs font-mono font-bold text-center rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                   />
-                  <span className="text-xs text-slate-500">دقائق</span>
+                  <span className="text-xs text-slate-500 font-bold">دقيقة</span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* 4. SOUND TONE SELECTION */}
-          <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40">
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block mb-2">
-              نغمة التنبيه الصوتي:
-            </span>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {ALERT_TONE_OPTIONS.map((opt) => (
-                <div
-                  key={opt.id}
-                  className={`flex items-center justify-between p-2 rounded-xl border transition cursor-pointer ${
-                    selectedTone === opt.id
-                      ? 'bg-amber-400/15 border-amber-500 text-slate-950 dark:text-amber-300 font-bold'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                  }`}
-                  onClick={() => setSelectedTone(opt.id)}
-                >
-                  <span className="text-[11px] truncate">{opt.name}</span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleTestTone(opt.id);
-                    }}
-                    className="p-1 rounded-lg hover:bg-amber-500/20 text-amber-600 dark:text-amber-400"
-                    title="استماع للنغمة"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
+          {/* 4. SOUND TONE SELECTION WITH NATIVE DEVICE TONE & CUSTOM FILE UPLOAD */}
+          <div className="p-3 sm:p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40">
+            <SoundToneSelector
+              selectedTone={selectedTone}
+              onSelectTone={setSelectedTone}
+              title="نغمة التنبيه الصوتي للعملة:"
+            />
           </div>
         </div>
 
-        {/* MODAL FOOTER */}
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/80 flex items-center justify-between gap-3">
+        {/* MODAL FOOTER - Always pinned at bottom */}
+        <div className="flex-shrink-0 p-3 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/95 dark:bg-slate-900/95 flex items-center justify-between gap-3 sticky bottom-0 z-20">
           <button
             type="button"
-            onClick={onClose}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
             className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition cursor-pointer"
           >
             إلغاء
@@ -476,7 +464,10 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
 
           <button
             type="button"
-            onClick={handleSave}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSave();
+            }}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition cursor-pointer shadow-md shadow-amber-400/20"
           >
             <Check className="w-4 h-4 stroke-[2.5]" />
@@ -486,4 +477,21 @@ export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
+};
+
+export const RangeAlertSettingsModal: React.FC<RangeAlertSettingsModalProps> = (props) => {
+  const [mounted, setMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setMounted(true);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!props.isOpen || !mounted) return null;
+
+  return <RangeAlertSettingsModalContent {...props} />;
 };

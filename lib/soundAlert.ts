@@ -1,36 +1,45 @@
 /**
- * مولد نغمات وتنبيهات صوتية باستخدام Web Audio API
- * يعمل محلياً في المتصفح دون الحاجة لتحميل ملفات صوتية خارجية
+ * مولد ومشغل نغمات وتنبيهات صوتية
+ * يدعم:
+ * 1. نغمة الجهاز الافتراضية مع اهتزاز الهاتف (Device System Tone)
+ * 2. النغمات المصممة محلياً عبر Web Audio API
+ * 3. تحميل وتعيين نغمة مخصصة من ملفات الجهاز (Custom Audio File: MP3, WAV, M4A)
  */
 
-export type AlertToneId = 'celebration' | 'radar' | 'bell' | 'arcade' | 'chime';
+export type AlertToneId = 'system' | 'celebration' | 'radar' | 'bell' | 'arcade' | 'chime' | 'custom';
 
 export interface AlertToneOption {
   id: AlertToneId;
   name: string;
   description: string;
+  icon?: string;
 }
 
+export const STORAGE_KEY_ALERT_TONE = 'price_calc_v0_alert_tone';
+export const STORAGE_KEY_CUSTOM_TONE_DATA = 'price_calc_v0_custom_tone_data';
+export const STORAGE_KEY_CUSTOM_TONE_NAME = 'price_calc_v0_custom_tone_name';
+
 export const ALERT_TONE_OPTIONS: AlertToneOption[] = [
+  { id: 'system', name: 'نغمة الجهاز الافتراضية 📱', description: 'نغمة النظام الكلاسيكية مع اهتزاز الجهاز' },
   { id: 'celebration', name: 'بهجة وصعود 🎯', description: 'سلسلة نغمات متصاعدة بهيجة واضحة' },
   { id: 'radar', name: 'رادار نبضي 📡', description: 'نبضتان متتاليتان بتردد نقي وقوي' },
   { id: 'bell', name: 'رنين جرس 🔔', description: 'نغمة جرس ناعمة ورنانة' },
   { id: 'arcade', name: 'إلكتروني سريع 🚀', description: 'نغمة حماسية سريعة كألعاب الفيديو' },
   { id: 'chime', name: 'تنبيه ناعم ✨', description: 'نغمة كلاسيكية مزدوجة هادئة' },
+  { id: 'custom', name: 'نغمة مخصصة من جهازي 📁', description: 'تحميل أي ملف صوتي (MP3, WAV, M4A) من هاتفك أو حاسوبك' },
 ];
-
-export const STORAGE_KEY_ALERT_TONE = 'price_calc_v0_alert_tone';
 
 class SoundAlertPlayer {
   private audioCtx: AudioContext | null = null;
   private isMuted: boolean = false;
-  private activeTone: AlertToneId = 'celebration';
+  private activeTone: AlertToneId = 'system';
+  private customAudioCache: HTMLAudioElement | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem(STORAGE_KEY_ALERT_TONE) as AlertToneId;
-        if (saved && ['celebration', 'radar', 'bell', 'arcade', 'chime'].includes(saved)) {
+        if (saved && ['system', 'celebration', 'radar', 'bell', 'arcade', 'chime', 'custom'].includes(saved)) {
           this.activeTone = saved;
         }
       } catch {
@@ -77,6 +86,80 @@ class SoundAlertPlayer {
   }
 
   /**
+   * جلب اسم النغمة المخصصة المحفوظة إن وجدت
+   */
+  public getCustomToneName(): string | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      return localStorage.getItem(STORAGE_KEY_CUSTOM_TONE_NAME);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * هل قام المستخدم برفع ملف صوتي مخصص سابقاً؟
+   */
+  public hasCustomTone(): boolean {
+    if (typeof window === 'undefined') return false;
+    try {
+      return !!localStorage.getItem(STORAGE_KEY_CUSTOM_TONE_DATA);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * حفظ نغمة مخصصة من ملف المستخدم
+   */
+  public async saveCustomTone(file: File): Promise<{ success: boolean; name: string; error?: string }> {
+    if (!file.type.startsWith('audio/') && !file.name.match(/\.(mp3|wav|ogg|m4a|aac|flac)$/i)) {
+      return { success: false, name: '', error: 'يرجى اختيار ملف صوتي صالح بصيغة (MP3, WAV, OGG, M4A)' };
+    }
+    // حد أقصى 3 ميجابايت لضمان عدم امتلاء ذاكرة المتصفح
+    if (file.size > 3 * 1024 * 1024) {
+      return { success: false, name: '', error: 'حجم الملف الصوتي كبير (الحد الأقصى المسموح 3 ميجابايت)' };
+    }
+
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const dataUrl = reader.result as string;
+          localStorage.setItem(STORAGE_KEY_CUSTOM_TONE_DATA, dataUrl);
+          localStorage.setItem(STORAGE_KEY_CUSTOM_TONE_NAME, file.name);
+          this.customAudioCache = new Audio(dataUrl);
+          this.setActiveTone('custom');
+          resolve({ success: true, name: file.name });
+        } catch {
+          resolve({ success: false, name: '', error: 'تعذر حفظ الملف في ذاكرة المتصفح، جرب ملفاً أصغر' });
+        }
+      };
+      reader.onerror = () => {
+        resolve({ success: false, name: '', error: 'فشل قراءة الملف الصوتي' });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
+   * حذف النغمة المخصصة والعودة لنغمة الجهاز
+   */
+  public removeCustomTone() {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.removeItem(STORAGE_KEY_CUSTOM_TONE_DATA);
+      localStorage.removeItem(STORAGE_KEY_CUSTOM_TONE_NAME);
+      this.customAudioCache = null;
+      if (this.activeTone === 'custom') {
+        this.setActiveTone('system');
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
    * تشغيل نغمة الهدف وفق النغمة المختارة
    */
   public playTargetReachedAlert(overrideTone?: AlertToneId) {
@@ -85,16 +168,71 @@ class SoundAlertPlayer {
   }
 
   /**
-   * تشغيل نغمة مخصصة محددة (مع إمكانية التجربة والاستماع)
+   * تشغيل نغمة مخصصة محددة (مع إمكانية التجربة والاستماع الفوري)
    */
   public playTone(tone: AlertToneId) {
     if (this.isMuted) return;
+
+    // 1. خيار النغمة المخصصة من ملف الجهاز
+    if (tone === 'custom') {
+      let played = false;
+      if (typeof window !== 'undefined') {
+        try {
+          if (!this.customAudioCache) {
+            const savedData = localStorage.getItem(STORAGE_KEY_CUSTOM_TONE_DATA);
+            if (savedData) {
+              this.customAudioCache = new Audio(savedData);
+            }
+          }
+          if (this.customAudioCache) {
+            this.customAudioCache.currentTime = 0;
+            this.customAudioCache.volume = 0.95;
+            this.customAudioCache.play().catch(() => {
+              this.playTone('system');
+            });
+            played = true;
+          }
+        } catch {
+          // Ignore
+        }
+      }
+      if (played) return;
+      // إذا لم يكن هناك ملف مخصص، يتم تشغيل نغمة الجهاز الافتراضية كبديل
+      tone = 'system';
+    }
+
     try {
       const ctx = this.getAudioContext();
       if (!ctx) return;
       const now = ctx.currentTime;
 
       switch (tone) {
+        case 'system': {
+          // نغمة رنين الجهاز الافتراضية (Dual Harmonic System Ping) مع اهتزاز الهاتف
+          if (typeof window !== 'undefined' && 'navigator' in window && 'vibrate' in navigator) {
+            try {
+              navigator.vibrate([200, 80, 200]);
+            } catch {}
+          }
+          [
+            { freq: 587.33, time: 0, dur: 0.12 }, // D5
+            { freq: 880.00, time: 0.1, dur: 0.32 }, // A5
+          ].forEach(({ freq, time, dur }) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, now + time);
+            gain.gain.setValueAtTime(0, now + time);
+            gain.gain.linearRampToValueAtTime(0.35, now + time + 0.015);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + time + dur);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now + time);
+            osc.stop(now + time + dur + 0.03);
+          });
+          break;
+        }
+
         case 'celebration': {
           // نغمة مكونة من 4 نغمات متصاعدة بهيجة (E5 -> G#5 -> B5 -> E6)
           const notes = [

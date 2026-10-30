@@ -1293,7 +1293,7 @@ export default function CalculatorPage() {
   }, [currencies, scalpTrades, defaultFees]);
 
   return (
-    <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 pb-28 sm:pb-32 overflow-x-hidden transition-colors">
+    <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 pb-28 sm:pb-32 overflow-x-clip transition-colors">
       {/* Background Ambience and Guide */}
       <WorkspaceBackground 
         mode={activeCurrencyId && activeMainTab === 'calculator' ? windowMode : 'normal'}

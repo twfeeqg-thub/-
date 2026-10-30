@@ -22,6 +22,7 @@ import {
   Smartphone
 } from 'lucide-react';
 import { soundAlert, ALERT_TONE_OPTIONS, AlertToneId } from '@/lib/soundAlert';
+import { SoundToneSelector } from './SoundToneSelector';
 import { systemNotification } from '@/lib/systemNotification';
 import { useSystemNotification } from '@/hooks/useSystemNotification';
 import { formatCurrencyPrice } from '@/lib/calculator';
@@ -711,41 +712,17 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
             </span>
           </div>
 
-          {/* Tone Customization Selector Panel */}
+          {/* Tone Customization Selector Panel with Native Device Tone & Custom File Upload */}
           {soundEnabled && (
-            <div className="p-2.5 rounded-xl bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Music className="w-3.5 h-3.5 text-amber-500" />
-                  <span>تخصيص نغمة تنبيه الوصول للهدف:</span>
-                </span>
-                <span className="text-[10px] text-slate-400">اختر النغمة المفضلة لك</span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
-                {ALERT_TONE_OPTIONS.map((tone) => {
-                  const isSelected = selectedTone === tone.id;
-                  return (
-                    <button
-                      key={tone.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedTone(tone.id);
-                        soundAlert.setActiveTone(tone.id);
-                        soundAlert.playTone(tone.id);
-                      }}
-                      className={`px-2 py-1.5 rounded-lg text-xs font-medium border text-center transition flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
-                        isSelected
-                          ? 'bg-amber-500 text-slate-950 font-bold border-amber-500 shadow-xs'
-                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-400'
-                      }`}
-                      title={tone.description}
-                    >
-                      <span className="text-xs">{tone.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="p-3 rounded-2xl bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+              <SoundToneSelector
+                selectedTone={selectedTone}
+                onSelectTone={(tone) => {
+                  setSelectedTone(tone);
+                  soundAlert.setActiveTone(tone);
+                }}
+                title="تخصيص نغمة تنبيه الوصول للهدف:"
+              />
             </div>
           )}
         </div>

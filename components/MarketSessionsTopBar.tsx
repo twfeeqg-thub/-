@@ -182,7 +182,7 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
 
   return (
     <div 
-      className="w-full max-w-7xl mb-3 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl shadow-xs transition-all overflow-hidden"
+      className="sticky top-1 sm:top-2 z-40 w-full max-w-7xl mb-3 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-md transition-all overflow-hidden"
       dir="rtl"
       suppressHydrationWarning
     >
