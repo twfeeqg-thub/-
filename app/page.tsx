@@ -44,6 +44,7 @@ import { ThemeCustomizerModal } from '@/components/ThemeCustomizerModal';
 import { BreakEvenComparisonDrawer } from '@/components/BreakEvenComparisonDrawer';
 import { WatchlistDashboard } from '@/components/WatchlistDashboard';
 import { RangeScalperDashboard } from '@/components/RangeScalperDashboard';
+import { MarketSessionsTopBar } from '@/components/MarketSessionsTopBar';
 import { TradingViewChartModal } from '@/components/TradingViewChartModal';
 import { 
   WatchlistItem, 
@@ -1301,6 +1302,12 @@ export default function CalculatorPage() {
 
       {/* Offline Status Toast */}
       <OfflineIndicator />
+
+      {/* FIXED GLOBAL MARKET SESSIONS & LIQUIDITY TIMELINE BAR (شريط مواعيد البورصات والسيولة بتوقيت مكة) */}
+      <MarketSessionsTopBar
+        activeScreen={activeMainTab}
+        onNavigateToScreen={(screen) => setActiveMainTab(screen)}
+      />
 
       {/* Top Dedicated Control Bar */}
       <header className="relative z-20 w-full max-w-7xl flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-white/75 dark:bg-slate-900/75 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs mb-3">

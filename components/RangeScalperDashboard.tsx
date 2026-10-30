@@ -79,20 +79,8 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
   onOpenThemeCustomizer,
   onRegisterSymbolsForStream,
 }) => {
-  // 1. PERSISTED TRADES STATE
-  const [trades, setTrades] = useState<RangeTrackedTrade[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_RANGE_TRADES);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {
-      // Ignore
-    }
-    return [];
-  });
+  // 1. PERSISTED TRADES STATE (Initialized identically on SSR & Client)
+  const [trades, setTrades] = useState<RangeTrackedTrade[]>([]);
 
   const persistTrades = useCallback((newTrades: RangeTrackedTrade[]) => {
     setTrades(newTrades);
@@ -104,17 +92,7 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
   }, []);
 
   // 2. SAVED / PINNED COINS STATE
-  const [savedCoins, setSavedCoins] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return ['NEAR', 'SOL', 'PEPE', 'FET', 'SUI'];
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_RANGE_SAVED_COINS);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {}
-    return ['NEAR', 'SOL', 'PEPE', 'FET', 'SUI'];
-  });
+  const [savedCoins, setSavedCoins] = useState<string[]>(['NEAR', 'SOL', 'PEPE', 'FET', 'SUI']);
 
   const persistSavedCoins = (coins: string[]) => {
     setSavedCoins(coins);
@@ -128,36 +106,62 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
   const capitalNum = parseFloat(tradeCapitalInput) || 100;
 
   // Entry Fee
-  const [entryFeePercentInput, setEntryFeePercentInput] = useState<string>(() => {
-    if (typeof window === 'undefined') return defaultEntryFeePercent;
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_RANGE_COSTS);
-      if (saved) return JSON.parse(saved).entryFee || defaultEntryFeePercent;
-    } catch {}
-    return defaultEntryFeePercent;
-  });
+  const [entryFeePercentInput, setEntryFeePercentInput] = useState<string>(defaultEntryFeePercent);
   const [entryFeeUsdtInput, setEntryFeeUsdtInput] = useState<string>(() => {
-    const pct = parseFloat(entryFeePercentInput) || 0.1;
+    const pct = parseFloat(defaultEntryFeePercent) || 0.1;
     return ((100 * pct) / 100).toFixed(2);
   });
 
   // Exit Fee
-  const [exitFeePercentInput, setExitFeePercentInput] = useState<string>(() => {
-    if (typeof window === 'undefined') return defaultExitFeePercent;
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_RANGE_COSTS);
-      if (saved) return JSON.parse(saved).exitFee || defaultExitFeePercent;
-    } catch {}
-    return defaultExitFeePercent;
-  });
+  const [exitFeePercentInput, setExitFeePercentInput] = useState<string>(defaultExitFeePercent);
   const [exitFeeUsdtInput, setExitFeeUsdtInput] = useState<string>(() => {
-    const pct = parseFloat(exitFeePercentInput) || 0.1;
+    const pct = parseFloat(defaultExitFeePercent) || 0.1;
     return ((100 * pct) / 100).toFixed(2);
   });
 
   // Slippage
   const [slippagePercentInput, setSlippagePercentInput] = useState<string>('0.1');
   const [slippageUsdtInput, setSlippageUsdtInput] = useState<string>('0.10');
+
+  // Load saved state from localStorage safely on client mount (prevents SSR hydration mismatch)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        const savedTrades = localStorage.getItem(STORAGE_KEY_RANGE_TRADES);
+        if (savedTrades) {
+          const parsed = JSON.parse(savedTrades);
+          if (Array.isArray(parsed)) setTrades(parsed);
+        }
+
+        const savedC = localStorage.getItem(STORAGE_KEY_RANGE_SAVED_COINS);
+        if (savedC) {
+          const parsed = JSON.parse(savedC);
+          if (Array.isArray(parsed)) setSavedCoins(parsed);
+        }
+
+        const savedCosts = localStorage.getItem(STORAGE_KEY_RANGE_COSTS);
+        if (savedCosts) {
+          const parsed = JSON.parse(savedCosts);
+          if (parsed.entryFee) {
+            setEntryFeePercentInput(parsed.entryFee);
+            setEntryFeeUsdtInput(((capitalNum * (parseFloat(parsed.entryFee) || 0.1)) / 100).toFixed(2));
+          }
+          if (parsed.exitFee) {
+            setExitFeePercentInput(parsed.exitFee);
+            setExitFeeUsdtInput(((capitalNum * (parseFloat(parsed.exitFee) || 0.1)) / 100).toFixed(2));
+          }
+          if (parsed.slippage) {
+            setSlippagePercentInput(parsed.slippage);
+            setSlippageUsdtInput(((capitalNum * (parseFloat(parsed.slippage) || 0.1)) / 100).toFixed(2));
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [capitalNum]);
 
   // Synchronize percent to USDT
   const handleUpdateFeePercent = (type: 'entry' | 'exit' | 'slippage', percentVal: string) => {

@@ -101,12 +101,15 @@ export const RangeTradeLedger: React.FC<RangeTradeLedgerProps> = ({
         {closedTrades.map((item) => {
           const netUsdt = item.realizedNetPnlUsdt !== undefined ? item.realizedNetPnlUsdt : (item.realizedPnlUsdt || 0);
           const isProfit = netUsdt >= 0;
-          const entryTimeStr = item.entryTimestamp
-            ? new Date(item.entryTimestamp).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
-            : '—';
-          const exitTimeStr = item.exitTimestamp
-            ? new Date(item.exitTimestamp).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
-            : '—';
+          const formatTime = (ts?: number) => {
+            if (!ts) return '—';
+            const d = new Date(ts);
+            const h = String(d.getHours()).padStart(2, '0');
+            const m = String(d.getMinutes()).padStart(2, '0');
+            return `${h}:${m}`;
+          };
+          const entryTimeStr = formatTime(item.entryTimestamp);
+          const exitTimeStr = formatTime(item.exitTimestamp);
 
           return (
             <div
@@ -132,7 +135,7 @@ export const RangeTradeLedger: React.FC<RangeTradeLedgerProps> = ({
                       (مدة الصفقة: {item.holdingDurationMinutes || 1} دقيقة)
                     </span>
                   </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono" suppressHydrationWarning>
                     شراء: ${item.entryPrice ? trimTrailingZeros(item.entryPrice.toString()) : '—'} ({entryTimeStr}) 
                     ← بيع: ${item.exitPrice ? trimTrailingZeros(item.exitPrice.toString()) : '—'} ({exitTimeStr})
                   </div>
