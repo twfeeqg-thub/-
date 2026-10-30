@@ -45,6 +45,7 @@ import { BreakEvenComparisonDrawer } from '@/components/BreakEvenComparisonDrawe
 import { WatchlistDashboard } from '@/components/WatchlistDashboard';
 import { RangeScalperDashboard } from '@/components/RangeScalperDashboard';
 import { MarketSessionsTopBar } from '@/components/MarketSessionsTopBar';
+import { BinanceQuickWidget, STORAGE_KEY_BINANCE_FAB_HIDDEN } from '@/components/BinanceQuickWidget';
 import { TradingViewChartModal } from '@/components/TradingViewChartModal';
 import { 
   WatchlistItem, 
@@ -737,6 +738,70 @@ export default function CalculatorPage() {
     persistWatchlistItemsRef.current = persistWatchlistItems;
   }, [persistWatchlistItems]);
 
+  // Binance Floating Action Button State & Persistence
+  const [isBinanceFabHidden, setIsBinanceFabHidden] = useState<boolean>(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY_BINANCE_FAB_HIDDEN);
+        if (saved === 'true') {
+          setIsBinanceFabHidden(true);
+        }
+      } catch {}
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+
+  const handleRestoreBinanceFab = useCallback(() => {
+    setIsBinanceFabHidden(false);
+    try {
+      localStorage.setItem(STORAGE_KEY_BINANCE_FAB_HIDDEN, 'false');
+    } catch {}
+  }, []);
+
+  // Determine active coin for dynamic Binance deep link
+  const currentActiveSymbolName = useMemo(() => {
+    if (activeCurrency?.name) return activeCurrency.name;
+    if (scalpTrades.length > 0 && scalpTrades[0].name) return scalpTrades[0].name;
+    if (trackedCurrencies.length > 0 && trackedCurrencies[0].name) return trackedCurrencies[0].name;
+    if (rangeStreamSymbols.length > 0) return rangeStreamSymbols[0].replace('USDT', '');
+    return 'BTC';
+  }, [activeCurrency, scalpTrades, trackedCurrencies, rangeStreamSymbols]);
+
+  // Market volatility direction for top bar sessions
+  const marketVolatilityDirection = useMemo((): 'up' | 'down' | 'neutral' => {
+    const btcPrice = trackerLivePrices['BTCUSDT'];
+    if (btcPrice) {
+      const btcTracked = trackedCurrencies.find((t) => t.binanceSymbol === 'BTCUSDT');
+      if (btcTracked?.baselinePrice) {
+        return parseFloat(btcPrice) >= parseFloat(btcTracked.baselinePrice) ? 'up' : 'down';
+      }
+    }
+    return 'up';
+  }, [trackerLivePrices, trackedCurrencies]);
+
+  // Apply Binance wallet balance to Scalper Session Capital
+  const handleApplyBinanceBalanceToCapital = useCallback((balance: number) => {
+    const balanceStr = balance.toFixed(2);
+    setScalperSession((prev) => {
+      const updated = {
+        ...prev,
+        availableCapitalUsdt: balanceStr,
+        initialCapitalUsdt: balanceStr,
+      };
+      persistScalperSessionRef.current(updated);
+      return updated;
+    });
+    systemNotification.sendNotification({
+      title: '💼 تم تحديث رأس المال من بينانس!',
+      body: `تم تعيين رصيدك المتاح (${balanceStr} USDT) بنجاح كرأس مال للسكالبينج.`,
+      tag: 'binance-wallet-sync',
+      icon: '/pwa-192x192.png',
+      badge: '/icon.svg',
+    });
+  }, []);
+
   // Combined symbols key for WebSocket (Tracker + Scalper + Watchlist + Range Master)
   const trackedSymbolsKey = useMemo(() => {
     if (!isTrackerStreamActive) return '';
@@ -1307,6 +1372,16 @@ export default function CalculatorPage() {
       <MarketSessionsTopBar
         activeScreen={activeMainTab}
         onNavigateToScreen={(screen) => setActiveMainTab(screen)}
+        marketVolatilityDirection={marketVolatilityDirection}
+        onRestoreBinanceFab={handleRestoreBinanceFab}
+        isBinanceFabHidden={isBinanceFabHidden}
+      />
+
+      {/* FLOATING DRAGGABLE SMART BINANCE ACTION BUTTON & QUICK MENU */}
+      <BinanceQuickWidget
+        activeSymbol={currentActiveSymbolName}
+        onApplyBalanceToCapital={handleApplyBinanceBalanceToCapital}
+        onVisibilityChange={(v) => setIsBinanceFabHidden(!v)}
       />
 
       {/* Top Dedicated Control Bar */}

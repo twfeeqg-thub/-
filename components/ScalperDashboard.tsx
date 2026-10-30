@@ -26,7 +26,8 @@ import {
   Volume2,
   VolumeX,
   Palette,
-  Trash2
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { soundAlert } from '@/lib/soundAlert';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
@@ -163,6 +164,37 @@ export const ScalperDashboard: React.FC<ScalperDashboardProps> = ({
         totalRealizedVolumeUsdt: 0,
         avgDurationMinutes: 0,
       });
+    }
+  };
+
+  // Sync Binance Wallet live USDT balance directly into scalping capital
+  const [isSyncingWallet, setIsSyncingWallet] = useState(false);
+  const [walletSyncMessage, setWalletSyncMessage] = useState<string | null>(null);
+
+  const handleSyncBinanceWallet = async () => {
+    setIsSyncingWallet(true);
+    setWalletSyncMessage(null);
+    try {
+      const res = await fetch('/api/binance/wallet');
+      const data = await res.json();
+      if (data.configured && data.success && typeof data.usdtFree === 'number') {
+        const val = data.usdtFree.toFixed(2);
+        onUpdateSessionStats({
+          ...sessionStats,
+          availableCapitalUsdt: val,
+          initialCapitalUsdt: val,
+        });
+        setWalletSyncMessage(`تم جلب $${val} USDT من محفظة بينانس بنجاح!`);
+        setTimeout(() => setWalletSyncMessage(null), 4000);
+      } else {
+        setWalletSyncMessage(data.message || data.error || 'لم يتم ضبط مفاتيح بينانس في الخادم (.env)');
+        setTimeout(() => setWalletSyncMessage(null), 5000);
+      }
+    } catch {
+      setWalletSyncMessage('تعذر الاتصال بخادم التطبيق الداخلي');
+      setTimeout(() => setWalletSyncMessage(null), 4000);
+    } finally {
+      setIsSyncingWallet(false);
     }
   };
 
@@ -323,22 +355,40 @@ export const ScalperDashboard: React.FC<ScalperDashboardProps> = ({
           </div>
         </div>
 
-        {/* Metric 5: Capital & Reset Session */}
-        <div className="col-span-2 sm:col-span-1 p-3.5 rounded-2xl bg-white/70 dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-800 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 block mb-0.5">رأس المال المخصص</span>
-            <div className="font-mono font-bold text-base text-slate-900 dark:text-slate-100" dir="ltr">
-              ${sessionStats.availableCapitalUsdt || '1000'}
+        {/* Metric 5: Capital & Reset Session & Binance Wallet Sync */}
+        <div className="col-span-2 sm:col-span-1 p-3.5 rounded-2xl bg-white/70 dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 block mb-0.5">رأس المال المخصص</span>
+              <div className="font-mono font-bold text-base text-slate-900 dark:text-slate-100" dir="ltr">
+                ${sessionStats.availableCapitalUsdt || '1000'}
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleSyncBinanceWallet}
+                disabled={isSyncingWallet}
+                className="p-2 rounded-xl bg-[#F3BA2F]/15 hover:bg-[#F3BA2F]/30 text-amber-600 dark:text-amber-400 transition cursor-pointer"
+                title="جلب رصيد USDT المتاح من محفظة بينانس"
+              >
+                <RefreshCw className={`w-4 h-4 ${isSyncingWallet ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                type="button"
+                onClick={handleResetSession}
+                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 transition cursor-pointer"
+                title="تصفير إحصائيات الجلسة"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleResetSession}
-            className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 transition cursor-pointer"
-            title="تصفير إحصائيات الجلسة"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
+          {walletSyncMessage && (
+            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold block mt-1 animate-in fade-in truncate">
+              {walletSyncMessage}
+            </span>
+          )}
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   MarketSession, 
   GLOBAL_MARKET_SESSIONS, 
@@ -41,14 +41,37 @@ import {
 interface MarketSessionsTopBarProps {
   onNavigateToScreen?: (screen: 'range_master' | 'scalper' | 'calculator' | 'tracker' | 'watchlist') => void;
   activeScreen?: string;
+  marketVolatilityDirection?: 'up' | 'down' | 'neutral';
+  onRestoreBinanceFab?: () => void;
+  isBinanceFabHidden?: boolean;
 }
 
 export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
   onNavigateToScreen,
   activeScreen,
+  marketVolatilityDirection = 'up',
+  onRestoreBinanceFab,
+  isBinanceFabHidden,
 }) => {
   // Live Makkah Time (initialized with static constant for SSR matching, then synced on client mount)
   const [makkahTime, setMakkahTime] = useState<MakkahTimeInfo>(DEFAULT_INITIAL_MAKKAH_TIME);
+
+  // Helper to determine session volatility direction and visual label
+  const getSessionVolatility = useCallback((session: MarketSession, isOpen: boolean) => {
+    if (!isOpen) {
+      return { direction: 'neutral' as const, label: 'خامل (السوق مغلق)' };
+    }
+    if (isGoldenOverlapActive(makkahTime.decimalHours) && (session.id === 'london' || session.id === 'newyork')) {
+      if (marketVolatilityDirection === 'down') {
+        return { direction: 'down' as const, label: 'ذروة تذبذب هابطة ⚠️' };
+      }
+      return { direction: 'up' as const, label: 'ذروة تذبذب صاعدة 🔥' };
+    }
+    if (marketVolatilityDirection === 'down') {
+      return { direction: 'down' as const, label: 'تذبذب نشط هابط 🔴' };
+    }
+    return { direction: 'up' as const, label: 'تذبذب نشط صاعد 🟢' };
+  }, [makkahTime.decimalHours, marketVolatilityDirection]);
 
   // Collapse / Expand State
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
@@ -209,19 +232,34 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
           {GLOBAL_MARKET_SESSIONS.map((session) => {
             const open = isSessionOpen(session, makkahTime.decimalHours);
+            const vol = getSessionVolatility(session, open);
             return (
               <div
                 key={session.id}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold border transition ${
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold border transition ${
                   open
                     ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 shadow-xs'
                     : 'bg-slate-100/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/60 text-slate-400'
                 }`}
-                title={session.description}
+                title={`${session.description} • حالة التذبذب: ${vol.label}`}
               >
                 <span>{session.flag}</span>
                 <span className="truncate">{session.name.replace('جلسة ', '')}</span>
-                <span className={`w-1.5 h-1.5 rounded-full ${open ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+
+                {/* 1. Market Open Status Indicator */}
+                <span className={`w-1.5 h-1.5 rounded-full ${open ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+
+                {/* 2. Visual Volatility Fluctuation Indicator (نقطة خضراء أو حمراء توضح تقلب السعر والتذبذب) */}
+                <span
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    vol.direction === 'up'
+                      ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)] animate-pulse'
+                      : vol.direction === 'down'
+                      ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.9)] animate-pulse'
+                      : 'bg-slate-400/40'
+                  }`}
+                  title={`حالة التذبذب اللحظية: ${vol.label}`}
+                />
               </div>
             );
           })}
@@ -229,6 +267,18 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
 
         {/* Right: Liquidity Badge, Alert Toggle, Collapse Toggle */}
         <div className="flex items-center gap-1.5">
+          {/* Restore Binance Floating Widget if hidden by user */}
+          {isBinanceFabHidden && onRestoreBinanceFab && (
+            <button
+              type="button"
+              onClick={onRestoreBinanceFab}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#F3BA2F]/15 border border-[#F3BA2F]/40 text-amber-600 dark:text-amber-400 text-[11px] font-bold hover:bg-[#F3BA2F]/25 transition cursor-pointer"
+              title="إظهار أيقونة بينانس العائمة مجدداً"
+            >
+              <span>🟡 بينانس</span>
+            </button>
+          )}
+
           {/* Current Liquidity Badge */}
           <span className={`text-[10px] sm:text-[11px] px-2 py-0.5 rounded-md ${liquidity.badgeClass}`} suppressHydrationWarning>
             {liquidity.title}
@@ -358,24 +408,45 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1">
               {GLOBAL_MARKET_SESSIONS.map((session) => {
                 const countdown = getSessionCountdown(session, makkahTime.decimalHours);
+                const vol = getSessionVolatility(session, countdown.isOpen);
                 return (
                   <div 
                     key={session.id}
                     className="p-2 rounded-xl bg-white/70 dark:bg-slate-900/60 border border-slate-200/70 dark:border-slate-800"
                     suppressHydrationWarning
                   >
-                    <div className="flex items-center justify-between mb-0.5">
+                    <div className="flex items-center justify-between mb-1">
                       <span className="font-bold text-[11px] text-slate-800 dark:text-slate-200 flex items-center gap-1">
                         <span>{session.flag}</span>
                         <span>{session.name.replace('جلسة ', '')}</span>
                       </span>
-                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
-                        countdown.isOpen 
-                          ? 'bg-emerald-500/15 text-emerald-500' 
-                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400'
-                      }`}>
-                        {countdown.isOpen ? 'مفتوح' : 'مغلق'}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        {/* Volatility Status Badge */}
+                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded flex items-center gap-1 ${
+                          vol.direction === 'up'
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                            : vol.direction === 'down'
+                            ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                        }`} title={`حالة التذبذب: ${vol.label}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            vol.direction === 'up'
+                              ? 'bg-emerald-500 animate-pulse'
+                              : vol.direction === 'down'
+                              ? 'bg-rose-500 animate-pulse'
+                              : 'bg-slate-400'
+                          }`} />
+                          <span>{vol.direction === 'up' ? 'صاعد' : vol.direction === 'down' ? 'هابط' : 'خامل'}</span>
+                        </span>
+
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
+                          countdown.isOpen 
+                            ? 'bg-emerald-500/15 text-emerald-500' 
+                            : 'bg-slate-200 dark:bg-slate-800 text-slate-400'
+                        }`}>
+                          {countdown.isOpen ? 'مفتوح' : 'مغلق'}
+                        </span>
+                      </div>
                     </div>
                     <span className="text-[10px] text-slate-500 block font-mono" suppressHydrationWarning>
                       {countdown.text}
