@@ -10,7 +10,9 @@ import {
   Binance24hTickerItem,
   STORAGE_KEY_RANGE_TRADES,
   STORAGE_KEY_RANGE_COSTS,
-  STORAGE_KEY_RANGE_SAVED_COINS
+  STORAGE_KEY_RANGE_SAVED_COINS,
+  STORAGE_KEY_RANGE_LAST_STATE,
+  RangeLastState
 } from '@/types/rangeScalper';
 import { analyzeRangeFromMinuteKlines, calculateRangeBreakEven, fetchBinanceUsdtTickers } from '@/lib/rangeAnalysis';
 import { RangeTradeCard } from './RangeTradeCard';
@@ -91,15 +93,25 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     }
   }, []);
 
-  // 2. SAVED / PINNED COINS STATE
-  const [savedCoins, setSavedCoins] = useState<string[]>(['NEAR', 'SOL', 'PEPE', 'FET', 'SUI']);
+  // 2. SAVED / PINNED COINS STATE (فارغة افتراضياً وبدون أي عملات مسبقة، فقط ما يختاره المستخدم)
+  const [savedCoins, setSavedCoins] = useState<string[]>([]);
 
-  const persistSavedCoins = (coins: string[]) => {
+  const persistSavedCoins = useCallback((coins: string[]) => {
     setSavedCoins(coins);
     try {
       localStorage.setItem(STORAGE_KEY_RANGE_SAVED_COINS, JSON.stringify(coins));
     } catch {}
-  };
+  }, []);
+
+  // Helper to persist last user configuration & analysis state
+  const persistLastState = useCallback((stateUpdates: Partial<RangeLastState>) => {
+    try {
+      const existing = localStorage.getItem(STORAGE_KEY_RANGE_LAST_STATE);
+      const parsed = existing ? JSON.parse(existing) : {};
+      const updated = { ...parsed, ...stateUpdates };
+      localStorage.setItem(STORAGE_KEY_RANGE_LAST_STATE, JSON.stringify(updated));
+    } catch {}
+  }, []);
 
   // 3. TRADE CAPITAL & DUAL COSTS INPUTS (نسبة % ومبلغ $)
   const [tradeCapitalInput, setTradeCapitalInput] = useState<string>('100');
@@ -123,6 +135,13 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
   const [slippagePercentInput, setSlippagePercentInput] = useState<string>('0.1');
   const [slippageUsdtInput, setSlippageUsdtInput] = useState<string>('0.10');
 
+  // 4. ANALYSIS CONTROLS & STATE (لا عملات افتراضية، يعرض فقط ما يختاره المستخدم ويتذكر آخر حالة)
+  const [selectedTimeframeMinutes, setSelectedTimeframeMinutes] = useState<number>(60);
+  const [symbolInput, setSymbolInput] = useState<string>('');
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [currentAnalysis, setCurrentAnalysis] = useState<RangeAnalysisResult | null>(null);
+
   // Load saved state from localStorage safely on client mount (prevents SSR hydration mismatch)
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -137,6 +156,33 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
         if (savedC) {
           const parsed = JSON.parse(savedC);
           if (Array.isArray(parsed)) setSavedCoins(parsed);
+        }
+
+        // Load user's last remembered state (آخر عملة، الفريم، رأس المال، نتيجة التحليل)
+        const savedLast = localStorage.getItem(STORAGE_KEY_RANGE_LAST_STATE);
+        if (savedLast) {
+          const parsed: RangeLastState = JSON.parse(savedLast);
+          if (parsed.lastSymbol) {
+            setSymbolInput(parsed.lastSymbol);
+          }
+          if (parsed.lastTimeframeMinutes) {
+            setSelectedTimeframeMinutes(parsed.lastTimeframeMinutes);
+          }
+          if (parsed.tradeCapitalInput) {
+            setTradeCapitalInput(parsed.tradeCapitalInput);
+          }
+          if (parsed.entryFeePercentInput) {
+            setEntryFeePercentInput(parsed.entryFeePercentInput);
+          }
+          if (parsed.exitFeePercentInput) {
+            setExitFeePercentInput(parsed.exitFeePercentInput);
+          }
+          if (parsed.slippagePercentInput) {
+            setSlippagePercentInput(parsed.slippagePercentInput);
+          }
+          if (parsed.lastAnalysis) {
+            setCurrentAnalysis(parsed.lastAnalysis);
+          }
         }
 
         const savedCosts = localStorage.getItem(STORAGE_KEY_RANGE_COSTS);
@@ -241,13 +287,6 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     };
   }, []);
 
-  // 5. ANALYSIS CONTROLS
-  const [selectedTimeframeMinutes, setSelectedTimeframeMinutes] = useState<number>(60);
-  const [symbolInput, setSymbolInput] = useState<string>('NEAR');
-  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [currentAnalysis, setCurrentAnalysis] = useState<RangeAnalysisResult | null>(null);
-
   // Active filter tab
   const [activeFilter, setActiveFilter] = useState<'all' | 'watching_trough' | 'in_trade'>('all');
 
@@ -277,6 +316,14 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
       setCurrentAnalysis(result);
       setSymbolInput(result.symbol);
 
+      // Save to last remembered state in localStorage
+      persistLastState({
+        lastSymbol: result.symbol,
+        lastTimeframeMinutes: tf,
+        tradeCapitalInput: String(cap),
+        lastAnalysis: result,
+      });
+
       // Save to recently searched / saved coins
       if (!savedCoins.includes(result.symbol)) {
         persistSavedCoins([result.symbol, ...savedCoins].slice(0, 20));
@@ -286,16 +333,7 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     } finally {
       setIsAnalyzing(false);
     }
-  }, [symbolInput, selectedTimeframeMinutes, entryFeePercentInput, exitFeePercentInput, slippagePercentInput, tradeCapitalInput, savedCoins]);
-
-  // Auto-run analysis once on initial load for default symbol
-  const hasRunInitialRef = useRef(false);
-  useEffect(() => {
-    if (!hasRunInitialRef.current) {
-      hasRunInitialRef.current = true;
-      handleRunAnalysis('NEAR', 60);
-    }
-  }, [handleRunAnalysis]);
+  }, [symbolInput, selectedTimeframeMinutes, entryFeePercentInput, exitFeePercentInput, slippagePercentInput, tradeCapitalInput, savedCoins, persistLastState, persistSavedCoins, setSymbolInput, setCurrentAnalysis]);
 
   // Sync symbols with Binance WebSocket safely without feedback loop
   const onRegisterSymbolsRef = useRef(onRegisterSymbolsForStream);
@@ -847,7 +885,9 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
         <div className="flex flex-wrap items-center gap-1.5 max-h-36 overflow-y-auto pr-1">
           {displayedCoinList.length === 0 ? (
             <div className="text-xs text-slate-500 py-3">
-              لا توجد عملات تطابق البحث. يمكنك كتابة أي رمز أعلاه لتحليله فوراً.
+              {activeSectorTab === 'saved'
+                ? 'لا توجد عملات محفوظة بعد. عند فحص أو البحث عن أي عملة ستُحفظ هنا تلقائياً للوصول السريع.'
+                : 'لا توجد عملات تطابق البحث. يمكنك كتابة أي رمز في حقل الفحص لتحليله فوراً.'}
             </div>
           ) : (
             displayedCoinList.map((sym) => (
@@ -900,7 +940,7 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
                     value={symbolInput}
                     onChange={(e) => setSymbolInput(e.target.value.toUpperCase())}
                     onKeyDown={(e) => e.key === 'Enter' && handleRunAnalysis()}
-                    placeholder="مثال: SOL أو NEAR"
+                    placeholder="اكتب رمز أي عملة (مثال: BTC, SOL, ETH)..."
                     className="w-full px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:border-amber-500"
                   />
                 </div>
@@ -915,7 +955,10 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
                   onChange={(e) => {
                     const tf = Number(e.target.value);
                     setSelectedTimeframeMinutes(tf);
-                    handleRunAnalysis(symbolInput, tf);
+                    persistLastState({ lastTimeframeMinutes: tf });
+                    if (symbolInput.trim()) {
+                      handleRunAnalysis(symbolInput, tf);
+                    }
                   }}
                   className="w-full px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:border-amber-500"
                 >
@@ -944,7 +987,10 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
                   step="1"
                   min="1"
                   value={tradeCapitalInput}
-                  onChange={(e) => setTradeCapitalInput(e.target.value)}
+                  onChange={(e) => {
+                    setTradeCapitalInput(e.target.value);
+                    persistLastState({ tradeCapitalInput: e.target.value });
+                  }}
                   className="w-20 px-2 py-1 text-xs font-mono font-bold text-center rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                 />
                 <span className="text-xs font-bold text-slate-500">$</span>
@@ -1155,8 +1201,16 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="py-8 text-center text-xs text-slate-500">
-                جاري إعداد التحليل المالي...
+              <div className="py-12 px-4 text-center flex flex-col items-center justify-center">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center mb-3">
+                  <Search className="w-6 h-6 stroke-[2]" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">
+                  بانتظار تحديد العملة للفحص
+                </h3>
+                <p className="text-xs text-slate-500 max-w-sm">
+                  اكتب رمز العملة التي تريد فحصها في الحقل المقابل أو اختر أي عملة للبدء في فحص المسار العرضي وحساب سعر التعادل وصافي الربح المتوقع.
+                </p>
               </div>
             )}
           </div>

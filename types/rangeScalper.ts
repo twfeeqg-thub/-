@@ -184,3 +184,14 @@ export interface Binance24hTickerItem {
 export const STORAGE_KEY_RANGE_TRADES = 'price_calc_v0_range_trades';
 export const STORAGE_KEY_RANGE_COSTS = 'price_calc_v0_range_costs';
 export const STORAGE_KEY_RANGE_SAVED_COINS = 'price_calc_v0_range_saved_coins';
+export const STORAGE_KEY_RANGE_LAST_STATE = 'price_calc_v0_range_last_state';
+
+export interface RangeLastState {
+  lastSymbol?: string;
+  lastTimeframeMinutes?: number;
+  tradeCapitalInput?: string;
+  entryFeePercentInput?: string;
+  exitFeePercentInput?: string;
+  slippagePercentInput?: string;
+  lastAnalysis?: RangeAnalysisResult | null;
+}

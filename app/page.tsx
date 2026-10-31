@@ -1381,6 +1381,7 @@ export default function CalculatorPage() {
       <BinanceQuickWidget
         activeSymbol={currentActiveSymbolName}
         onApplyBalanceToCapital={handleApplyBinanceBalanceToCapital}
+        isHidden={isBinanceFabHidden}
         onVisibilityChange={(v) => setIsBinanceFabHidden(!v)}
       />
 

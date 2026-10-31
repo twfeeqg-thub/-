@@ -26,17 +26,22 @@ interface BinanceQuickWidgetProps {
   activeSymbol?: string;
   onApplyBalanceToCapital?: (balance: number) => void;
   isOpenStateControlled?: boolean;
+  isHidden?: boolean;
   onVisibilityChange?: (visible: boolean) => void;
 }
 
 export const BinanceQuickWidget: React.FC<BinanceQuickWidgetProps> = ({
   activeSymbol = 'BTC',
   onApplyBalanceToCapital,
+  isHidden: propIsHidden,
   onVisibilityChange,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [isHidden, setIsHidden] = useState(false);
+  const [localIsHidden, setLocalIsHidden] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // Effective hidden state: controlled prop has priority, fallback to local state
+  const isHidden = typeof propIsHidden === 'boolean' ? propIsHidden : localIsHidden;
 
   // Dragging coordinates
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 20, y: 120 });
@@ -65,7 +70,7 @@ export const BinanceQuickWidget: React.FC<BinanceQuickWidgetProps> = ({
       try {
         const savedHidden = localStorage.getItem(STORAGE_KEY_BINANCE_FAB_HIDDEN);
         if (savedHidden === 'true') {
-          setIsHidden(true);
+          setLocalIsHidden(true);
           onVisibilityChange?.(false);
         }
 
@@ -103,7 +108,7 @@ export const BinanceQuickWidget: React.FC<BinanceQuickWidgetProps> = ({
   // Toggle Visibility
   const handleToggleHide = () => {
     const next = !isHidden;
-    setIsHidden(next);
+    setLocalIsHidden(next);
     setIsOpen(false);
     onVisibilityChange?.(!next);
     try {
