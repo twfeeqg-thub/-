@@ -48,10 +48,9 @@ import { MarketSessionsTopBar } from '@/components/MarketSessionsTopBar';
 import { BinanceQuickWidget, STORAGE_KEY_BINANCE_FAB_HIDDEN } from '@/components/BinanceQuickWidget';
 import { TradingViewChartModal } from '@/components/TradingViewChartModal';
 import { SplashScreen } from '@/components/SplashScreen';
-import { AccountDashboard } from '@/components/AccountDashboard';
-import { EVENT_CLOUD_RESTORED } from '@/lib/cloudSync';
-import { STORAGE_KEY_SPLASH_SETTINGS } from '@/types/splash';
-import { useAuth } from '@/context/AuthContext';
+import { AccountSettingsDashboard } from '@/components/AccountSettingsDashboard';
+import { getActiveAppIcon, applyIconToDom } from '@/lib/appIconManager';
+import { EVENT_DATA_RESTORED } from '@/lib/localBackup';
 import { 
   WatchlistItem, 
   WatchlistCategory, 
@@ -61,25 +60,12 @@ import {
 } from '@/types/watchlist';
 import { systemNotification } from '@/lib/systemNotification';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
-import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList, Layers, UserCircle2 } from 'lucide-react';
+import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList, Layers, User } from 'lucide-react';
 
 export default function CalculatorPage() {
-  const { user, profile } = useAuth();
-  const [showSplash, setShowSplash] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const savedSplashSettings = localStorage.getItem(STORAGE_KEY_SPLASH_SETTINGS);
-        if (savedSplashSettings) {
-          const parsed = JSON.parse(savedSplashSettings);
-          if (parsed.enabled === false) return false;
-        }
-      } catch {}
-    }
-    return true;
-  });
-
-  // Navigation Tabs: 'calculator' | 'tracker' | 'scalper' | 'watchlist' | 'range_master' | 'account'
-  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'tracker' | 'scalper' | 'watchlist' | 'range_master' | 'account'>('range_master');
+  // Navigation Tabs: 'calculator' | 'range_master' | 'tracker' | 'watchlist' | 'account_settings'
+  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'range_master' | 'tracker' | 'watchlist' | 'account_settings'>('range_master');
+  const [isPreviewingSplash, setIsPreviewingSplash] = useState(false);
   const [rangeStreamSymbols, setRangeStreamSymbols] = useState<string[]>([]);
 
   const handleRegisterRangeSymbols = useCallback((symbols: string[]) => {
@@ -268,12 +254,23 @@ export default function CalculatorPage() {
     }
   }, []);
 
+  // Initialize PWA App Icon and listen to backup data restoration events
   useEffect(() => {
-    const handleCloudRestored = () => {
+    try {
+      const icon = getActiveAppIcon();
+      applyIconToDom(icon);
+    } catch (err) {
+      console.warn('Failed to apply app icon:', err);
+    }
+
+    const handleDataRestored = () => {
       reloadAllFromStorage();
     };
-    window.addEventListener(EVENT_CLOUD_RESTORED, handleCloudRestored);
-    return () => window.removeEventListener(EVENT_CLOUD_RESTORED, handleCloudRestored);
+
+    window.addEventListener(EVENT_DATA_RESTORED, handleDataRestored);
+    return () => {
+      window.removeEventListener(EVENT_DATA_RESTORED, handleDataRestored);
+    };
   }, [reloadAllFromStorage]);
 
   // Helper to persist currencies
@@ -1366,14 +1363,7 @@ export default function CalculatorPage() {
   };
 
   const handleNavigateToScalperFromWatchlist = (symbolName: string) => {
-    const clean = symbolName.trim().toUpperCase();
-    const pair = clean.endsWith('USDT') ? clean : `${clean}USDT`;
-    const baseName = pair.replace('USDT', '');
-    const exists = scalpTrades.find((t) => t.binanceSymbol === pair);
-    if (!exists) {
-      handleAddScalpTrade(baseName);
-    }
-    setActiveMainTab('scalper');
+    setActiveMainTab('range_master');
   };
 
   const handleReorderWatchlistItems = useCallback((newItems: WatchlistItem[]) => {
@@ -1426,13 +1416,11 @@ export default function CalculatorPage() {
 
   return (
     <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 pb-28 sm:pb-32 overflow-x-clip transition-colors">
-      {/* Animated Splash Screen v2 */}
-      {showSplash && (
-        <SplashScreen
-          isReady={isTrackerStreamActive && Object.keys(trackerLivePrices).length > 0}
-          onFinish={() => setShowSplash(false)}
-        />
-      )}
+      {/* Animated Splash Screen (Zero-Flicker Hydration Transition) */}
+      <SplashScreen 
+        forceShow={isPreviewingSplash} 
+        onFinish={() => setIsPreviewingSplash(false)} 
+      />
 
       {/* Background Ambience and Guide */}
       <WorkspaceBackground 
@@ -1484,23 +1472,6 @@ export default function CalculatorPage() {
 
         {/* Top Action Controls */}
         <div className="flex items-center flex-wrap gap-2">
-          {/* Account & Cloud Sync Trigger */}
-          <button
-            type="button"
-            onClick={() => setActiveMainTab('account')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
-              activeMainTab === 'account'
-                ? 'bg-amber-400 text-slate-950 border-amber-500 shadow-md font-black'
-                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-            }`}
-            title="إدارة الحساب والمزامنة السحابية v2"
-          >
-            <UserCircle2 className="w-4 h-4 text-amber-500" />
-            <span className="hidden sm:inline">
-              {user ? (profile?.displayName || user.email?.split('@')[0]) : 'الحساب v2'}
-            </span>
-            <span className={`w-2 h-2 rounded-full ${user ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-          </button>
           {/* Side-by-Side Break-Even Comparison Drawer Trigger */}
           <button
             type="button"
@@ -1552,6 +1523,21 @@ export default function CalculatorPage() {
           >
             <Radio className={`w-3.5 h-3.5 ${isTrackerStreamActive ? 'animate-pulse text-emerald-500' : ''}`} />
             <span className="hidden sm:inline">{isTrackerStreamActive ? 'بينانس متصل' : 'البث متوقف'}</span>
+          </button>
+
+          {/* Account & Profile Screen Button */}
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('account_settings')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition cursor-pointer border ${
+              activeMainTab === 'account_settings'
+                ? 'bg-amber-400 text-slate-950 border-amber-500 shadow-xs'
+                : 'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700'
+            }`}
+            title="الملف الشخصي والحساب والنسخ الاحتياطي"
+          >
+            <User className="w-4 h-4 text-amber-500" />
+            <span className="hidden md:inline">الحساب والإعدادات</span>
           </button>
         </div>
       </header>
@@ -1730,55 +1716,7 @@ export default function CalculatorPage() {
         )}
 
         {/* ========================================================= */}
-        {/* TAB 3: SCALPER TAB (لوحة السكالبينج ورصد القيعان)          */}
-        {/* ========================================================= */}
-        {activeMainTab === 'scalper' && (
-          <ScalperDashboard
-            trades={scalpTrades}
-            livePrices={trackerLivePrices}
-            isLiveStreamActive={isTrackerStreamActive}
-            sessionStats={scalperSession}
-            defaultEntryFeePercent={defaultFees.entryFeePercent || '0.1'}
-            defaultExitFeePercent={defaultFees.exitFeePercent || '0.1'}
-            onToggleLiveStream={handleToggleTrackerStream}
-            onUpdateSessionStats={handleUpdateScalperSession}
-            onAddTrade={handleAddScalpTrade}
-            onUpdateTrade={handleUpdateScalpTrade}
-            onDeleteTrade={handleDeleteScalpTrade}
-            onToggleActive={handleToggleScalpTradeActive}
-            onToggleAlerts={handleToggleScalpTradeAlerts}
-            onClearAllTrades={handleClearAllScalpTrades}
-            onOpenTrade={handleOpenScalpTrade}
-            onCloseTradeToUsdt={handleCloseScalpTradeToUsdt}
-            onNavigateToCalculator={handleNavigateToCalculatorFromScalp}
-            onNavigateToTracker={handleNavigateToTrackerFromScalp}
-            onOpenThemeCustomizer={() => setIsThemeCustomizerOpen(true)}
-          />
-        )}
-
-        {/* ========================================================= */}
-        {/* TAB 4: WATCHLIST TAB (شاشة مراقبة العملات TradingView)     */}
-        {/* ========================================================= */}
-        {activeMainTab === 'watchlist' && (
-          <WatchlistDashboard
-            watchlistItems={watchlistItems}
-            livePrices={trackerLivePrices}
-            isLiveStreamActive={isTrackerStreamActive}
-            currencies={currencies}
-            scalpTrades={scalpTrades}
-            onToggleLiveStream={handleToggleTrackerStream}
-            onUpdateWatchlistItem={handleUpdateWatchlistItem}
-            onAddWatchlistItem={handleAddWatchlistItem}
-            onDeleteWatchlistItem={handleDeleteWatchlistItem}
-            onReorderWatchlistItems={handleReorderWatchlistItems}
-            onOpenChart={(item) => handleOpenChartForCurrency(item)}
-            onNavigateToCalculator={(coinName) => handleOpenCalculatorForCurrency(coinName)}
-            onNavigateToScalper={handleNavigateToScalperFromWatchlist}
-            onSetPriceAlert={handleSetWatchlistAlert}
-          />
-        )}
-        {/* ========================================================= */}
-        {/* TAB 5: RANGE MASTER SCALPER (صائد القيعان والمسار العرضي) */}
+        {/* TAB 2: RANGE MASTER SCALPER (صائد القيعان والمسار العرضي) */}
         {/* ========================================================= */}
         {activeMainTab === 'range_master' && (
           <RangeScalperDashboard
@@ -1799,16 +1737,7 @@ export default function CalculatorPage() {
               }
               setActiveMainTab('tracker');
             }}
-            onNavigateToScalper={(symbol) => {
-              if (symbol) {
-                const clean = symbol.replace('USDT', '').trim().toUpperCase();
-                const exists = scalpTrades.some((s) => s.name === clean);
-                if (!exists) {
-                  handleAddScalpTrade(clean);
-                }
-              }
-              setActiveMainTab('scalper');
-            }}
+            onNavigateToScalper={() => setActiveMainTab('range_master')}
             onNavigateToWatchlist={() => setActiveMainTab('watchlist')}
             onOpenThemeCustomizer={() => setIsThemeCustomizerOpen(true)}
             onRegisterSymbolsForStream={handleRegisterRangeSymbols}
@@ -1816,11 +1745,37 @@ export default function CalculatorPage() {
         )}
 
         {/* ========================================================= */}
-        {/* TAB 6: ACCOUNT & CLOUD SYNC DASHBOARD (الحساب والإعدادات v2) */}
+        {/* TAB 3: WATCHLIST TAB (شاشة مراقبة العملات TradingView)     */}
         {/* ========================================================= */}
-        {activeMainTab === 'account' && (
-          <AccountDashboard />
+        {activeMainTab === 'watchlist' && (
+          <WatchlistDashboard
+            watchlistItems={watchlistItems}
+            livePrices={trackerLivePrices}
+            isLiveStreamActive={isTrackerStreamActive}
+            currencies={currencies}
+            scalpTrades={scalpTrades}
+            onToggleLiveStream={handleToggleTrackerStream}
+            onUpdateWatchlistItem={handleUpdateWatchlistItem}
+            onAddWatchlistItem={handleAddWatchlistItem}
+            onDeleteWatchlistItem={handleDeleteWatchlistItem}
+            onReorderWatchlistItems={handleReorderWatchlistItems}
+            onOpenChart={(item) => handleOpenChartForCurrency(item)}
+            onNavigateToCalculator={(coinName) => handleOpenCalculatorForCurrency(coinName)}
+            onNavigateToScalper={handleNavigateToScalperFromWatchlist}
+            onSetPriceAlert={handleSetWatchlistAlert}
+          />
         )}
+
+        {/* ========================================================= */}
+        {/* TAB 4: ACCOUNT, PROFILE, APP ICON & BACKUP MANAGEMENT     */}
+        {/* ========================================================= */}
+        {activeMainTab === 'account_settings' && (
+          <AccountSettingsDashboard
+            onPreviewSplash={() => setIsPreviewingSplash(true)}
+            onNavigateTab={(tab) => setActiveMainTab(tab as any)}
+          />
+        )}
+
       </div>
 
       {/* Settings Modal */}
@@ -1877,8 +1832,8 @@ export default function CalculatorPage() {
             }
             setActiveChartItem(null);
           }}
-          onNavigateToScalper={(name) => {
-            handleNavigateToScalperFromWatchlist(name);
+          onNavigateToScalper={() => {
+            setActiveMainTab('range_master');
             setActiveChartItem(null);
           }}
           onNavigateToRangeMaster={() => {
@@ -1905,129 +1860,147 @@ export default function CalculatorPage() {
         />
       )}
 
-      {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة للعناصر الستة بتباين فائق) */}
+      {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة الخماسية بأيقونات ملونة وأنيقة وبدون مسميات حرفية) */}
       <nav 
-        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-300 dark:border-slate-800 py-2 px-2 sm:px-4 shadow-[0_-4px_25px_rgba(0,0,0,0.12)] dark:shadow-[0_-4px_25px_rgba(0,0,0,0.6)]"
+        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-300 dark:border-slate-800 py-2.5 px-3 sm:px-6 shadow-[0_-4px_25px_rgba(0,0,0,0.12)] dark:shadow-[0_-4px_25px_rgba(0,0,0,0.6)]"
         dir="rtl"
         aria-label="القائمة الرئيسية الثابتة"
       >
-        <div className="max-w-4xl mx-auto grid grid-cols-6 gap-1 sm:gap-2">
-          {/* Item 1: حاسبة التجارة والتعادل */}
+        <div className="max-w-md sm:max-w-lg mx-auto grid grid-cols-5 gap-2 sm:gap-4">
+          {/* 1. حاسبة التعادل (أيقونة الحاسبة الذهبية الأنيقة) */}
           <button
             type="button"
             onClick={() => setActiveMainTab('calculator')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
+            title="حاسبة التعادل وحساب الأرباح والرسوم"
+            aria-label="حاسبة التعادل"
+            className={`group relative flex items-center justify-center p-2.5 rounded-2xl transition-all duration-200 cursor-pointer ${
               activeMainTab === 'calculator'
-                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
-                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+                ? 'bg-amber-400/20 text-amber-500 dark:text-amber-300 ring-2 ring-amber-400/60 shadow-[0_0_18px_rgba(251,191,36,0.35)] scale-105'
+                : 'text-amber-500/70 hover:text-amber-500 hover:bg-amber-500/10'
             }`}
           >
-            <Calculator className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'calculator' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
-            <span className="text-[10px] sm:text-xs tracking-tight">حاسبة التعادل</span>
-            <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
-              activeMainTab === 'calculator' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
-            }`}>
-              {currencies.length}
-            </span>
+            <Calculator className={`w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110 ${
+              activeMainTab === 'calculator' ? 'stroke-[2.5]' : 'stroke-[2]'
+            }`} />
+            {currencies.length > 0 && (
+              <span className={`absolute -top-1 -right-1 text-[9px] font-mono font-black px-1.5 py-0.2 rounded-full border ${
+                activeMainTab === 'calculator'
+                  ? 'bg-amber-400 text-slate-950 border-amber-300'
+                  : 'bg-slate-800 text-amber-400 border-slate-700'
+              }`}>
+                {currencies.length}
+              </span>
+            )}
+            {activeMainTab === 'calculator' && (
+              <span className="absolute -bottom-1 w-2.5 h-1 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]" />
+            )}
           </button>
 
-          {/* Item 2: صائد القيعان والمسار العرضي */}
+          {/* 2. صائد القيعان (أيقونة الطبقات والقيعان السماوية الكهربائية) */}
           <button
             type="button"
             onClick={() => setActiveMainTab('range_master')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
+            title="صائد القيعان والمسار العرضي"
+            aria-label="صائد القيعان"
+            className={`group relative flex items-center justify-center p-2.5 rounded-2xl transition-all duration-200 cursor-pointer ${
               activeMainTab === 'range_master'
-                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
-                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+                ? 'bg-cyan-400/20 text-cyan-600 dark:text-cyan-300 ring-2 ring-cyan-400/60 shadow-[0_0_18px_rgba(6,182,212,0.35)] scale-105'
+                : 'text-cyan-500/70 hover:text-cyan-500 hover:bg-cyan-500/10'
             }`}
           >
-            <Layers className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'range_master' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
-            <span className="text-[10px] sm:text-xs tracking-tight">صائد القيعان</span>
+            <Layers className={`w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110 ${
+              activeMainTab === 'range_master' ? 'stroke-[2.5]' : 'stroke-[2]'
+            }`} />
             {rangeStreamSymbols.length > 0 && (
-              <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
-                activeMainTab === 'range_master' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
+              <span className={`absolute -top-1 -right-1 text-[9px] font-mono font-black px-1.5 py-0.2 rounded-full border ${
+                activeMainTab === 'range_master'
+                  ? 'bg-cyan-400 text-slate-950 border-cyan-300'
+                  : 'bg-slate-800 text-cyan-400 border-slate-700'
               }`}>
                 {rangeStreamSymbols.length}
               </span>
             )}
-          </button>
-
-          {/* Item 3: لوحة السكالبينج السريعة */}
-          <button
-            type="button"
-            onClick={() => setActiveMainTab('scalper')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer relative ${
-              activeMainTab === 'scalper'
-                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
-                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
-            }`}
-          >
-            <Zap className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'scalper' ? 'fill-current' : 'stroke-[2]'}`} />
-            <span className="text-[10px] sm:text-xs tracking-tight">السكالبينج</span>
-            <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
-              activeMainTab === 'scalper' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
-            }`}>
-              {scalpTrades.length}
-            </span>
-            {scalpTrades.some((t) => t.status === 'in_trade') && (
-              <span className="absolute top-1.5 left-1.5 w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+            {activeMainTab === 'range_master' && (
+              <span className="absolute -bottom-1 w-2.5 h-1 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.9)]" />
             )}
           </button>
 
-          {/* Item 4: رصد صعود العملات */}
+          {/* 3. رصد الصعود (أيقونة الزخم والصعود الخضراء الزمردية) */}
           <button
             type="button"
             onClick={() => setActiveMainTab('tracker')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
+            title="رصد صعود العملات والزخم اللحظي"
+            aria-label="رصد الصعود"
+            className={`group relative flex items-center justify-center p-2.5 rounded-2xl transition-all duration-200 cursor-pointer ${
               activeMainTab === 'tracker'
-                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
-                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+                ? 'bg-emerald-400/20 text-emerald-600 dark:text-emerald-300 ring-2 ring-emerald-400/60 shadow-[0_0_18px_rgba(16,185,129,0.35)] scale-105'
+                : 'text-emerald-500/70 hover:text-emerald-500 hover:bg-emerald-500/10'
             }`}
           >
-            <TrendingUp className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'tracker' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
-            <span className="text-[10px] sm:text-xs tracking-tight">رصد الصعود</span>
-            <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
-              activeMainTab === 'tracker' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
-            }`}>
-              {trackedCurrencies.length}
-            </span>
+            <TrendingUp className={`w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110 ${
+              activeMainTab === 'tracker' ? 'stroke-[2.5]' : 'stroke-[2]'
+            }`} />
+            {trackedCurrencies.length > 0 && (
+              <span className={`absolute -top-1 -right-1 text-[9px] font-mono font-black px-1.5 py-0.2 rounded-full border ${
+                activeMainTab === 'tracker'
+                  ? 'bg-emerald-400 text-slate-950 border-emerald-300'
+                  : 'bg-slate-800 text-emerald-400 border-slate-700'
+              }`}>
+                {trackedCurrencies.length}
+              </span>
+            )}
+            {activeMainTab === 'tracker' && (
+              <span className="absolute -bottom-1 w-2.5 h-1 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.9)]" />
+            )}
           </button>
 
-          {/* Item 5: قائمة المراقبة (TradingView Watchlist) */}
+          {/* 4. قائمة المراقبة (أيقونة القائمة البنفسجية الملكية) */}
           <button
             type="button"
             onClick={() => setActiveMainTab('watchlist')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
+            title="قائمة المراقبة والتحليل المتقدم (Watchlist)"
+            aria-label="قائمة المراقبة"
+            className={`group relative flex items-center justify-center p-2.5 rounded-2xl transition-all duration-200 cursor-pointer ${
               activeMainTab === 'watchlist'
-                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
-                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+                ? 'bg-purple-400/20 text-purple-600 dark:text-purple-300 ring-2 ring-purple-400/60 shadow-[0_0_18px_rgba(168,85,247,0.35)] scale-105'
+                : 'text-purple-500/70 hover:text-purple-500 hover:bg-purple-500/10'
             }`}
           >
-            <LayoutList className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'watchlist' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
-            <span className="text-[10px] sm:text-xs tracking-tight">قائمة المراقبة</span>
-            <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-black ${
-              activeMainTab === 'watchlist' ? 'bg-slate-950 text-amber-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
-            }`}>
-              {watchlistItems.length}
-            </span>
+            <LayoutList className={`w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110 ${
+              activeMainTab === 'watchlist' ? 'stroke-[2.5]' : 'stroke-[2]'
+            }`} />
+            {watchlistItems.length > 0 && (
+              <span className={`absolute -top-1 -right-1 text-[9px] font-mono font-black px-1.5 py-0.2 rounded-full border ${
+                activeMainTab === 'watchlist'
+                  ? 'bg-purple-400 text-slate-950 border-purple-300'
+                  : 'bg-slate-800 text-purple-400 border-slate-700'
+              }`}>
+                {watchlistItems.length}
+              </span>
+            )}
+            {activeMainTab === 'watchlist' && (
+              <span className="absolute -bottom-1 w-2.5 h-1 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.9)]" />
+            )}
           </button>
 
-          {/* Item 6: الحساب والإعدادات الذكية v2 */}
+          {/* 5. الحساب والإعدادات (أيقونة المستخدم والملف الوردي الأنيق) */}
           <button
             type="button"
-            onClick={() => setActiveMainTab('account')}
-            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
-              activeMainTab === 'account'
-                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
-                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+            onClick={() => setActiveMainTab('account_settings')}
+            title="الملف الشخصي والحساب والنسخ الاحتياطي وتخصيص الأيقونة"
+            aria-label="الحساب والإعدادات"
+            className={`group relative flex items-center justify-center p-2.5 rounded-2xl transition-all duration-200 cursor-pointer ${
+              activeMainTab === 'account_settings'
+                ? 'bg-rose-400/20 text-rose-600 dark:text-rose-300 ring-2 ring-rose-400/60 shadow-[0_0_18px_rgba(244,63,94,0.35)] scale-105'
+                : 'text-rose-500/70 hover:text-rose-500 hover:bg-rose-500/10'
             }`}
           >
-            <UserCircle2 className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'account' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
-            <span className="text-[10px] sm:text-xs tracking-tight">الحساب v2</span>
-            {user ? (
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            ) : (
-              <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-500 font-bold">ضيف</span>
+            <User className={`w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:scale-110 ${
+              activeMainTab === 'account_settings' ? 'stroke-[2.5]' : 'stroke-[2]'
+            }`} />
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900" />
+            {activeMainTab === 'account_settings' && (
+              <span className="absolute -bottom-1 w-2.5 h-1 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.9)]" />
             )}
           </button>
         </div>

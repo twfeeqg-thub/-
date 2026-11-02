@@ -1,47 +1,59 @@
-export interface SplashQuote {
+export interface SplashPhrase {
   id: string;
   text: string;
+  category?: 'discipline' | 'analysis' | 'risk' | 'mindset';
   author?: string;
+  isCustom?: boolean;
 }
 
 export interface SplashSettings {
   enabled: boolean;
-  durationSeconds: number; // default 4
-  autoDismissOnReady: boolean; // true
+  durationSeconds: number; // default 4 seconds
+  allowSkip: boolean;
+  showOncePerSession: boolean;
+  phrases: SplashPhrase[];
 }
 
-export const STORAGE_KEY_SPLASH_QUOTES = 'bot2_splash_quotes';
-export const STORAGE_KEY_SPLASH_SETTINGS = 'bot2_splash_settings';
+export const STORAGE_KEY_SPLASH_SETTINGS = 'crypto_splash_settings_v2';
+export const SESSION_KEY_SPLASH_SHOWN = 'crypto_splash_shown_in_session_v2';
 
-export const DEFAULT_SPLASH_QUOTES: SplashQuote[] = [
+export const DEFAULT_SPLASH_PHRASES: SplashPhrase[] = [
   {
-    id: 'q1',
-    text: 'الانضباط وإدارة رأس المال هما سر البقاء والاستمرار في أسواق المال.',
-    author: 'قاعدة المتداول المحترف',
+    id: 'phrase_1',
+    text: '«الصبر والانضباط هما وقود الأرباح المستدامة في أسواق المال»',
+    category: 'discipline',
+    author: 'قواعد التداول الذكي',
   },
   {
-    id: 'q2',
-    text: 'لا تطارد الشموع الخضراء.. انتظر حتى يأتي السعر إلى مناطق قناصتك المدروسة.',
-    author: 'استراتيجية القناص',
+    id: 'phrase_2',
+    text: '«لا تطارد الشموع الخضراء، بل انتظر تأكيد المسار ونقاط الدخول الذهبية»',
+    category: 'analysis',
+    author: 'بوت مراقبة الصعود',
   },
   {
-    id: 'q3',
-    text: 'الخسارة الصغيرة جزء من تكلفة العمل، وحماية رأس المال أولوية قصوى دائماً.',
-    author: 'إدارة المخاطر',
+    id: 'phrase_3',
+    text: '«إدارة المخاطر الصارمة وحساب سعر التعادل هما حصنك المنيع لحماية رأس المال»',
+    category: 'risk',
+    author: 'حاسبة الفروقات السعرية',
   },
   {
-    id: 'q4',
-    text: 'الصبر هو الشجاعة الهادئة التي تجعل الأرباح تنمو والفرص تتضح.',
-    author: 'سيكولوجية التداول',
+    id: 'phrase_4',
+    text: '«السوق يكافئ الملتزمين بخطتهم ويعاقب المترددين والمندفعين بالعواطف»',
+    category: 'mindset',
+    author: 'حكمة المتداول المحترف',
   },
   {
-    id: 'q5',
-    text: 'تداول ما تراه على الشارت والبيانات، وليس ما تتمناه أو تخشاه بمشاعرك.',
-    author: 'الانضباط الفني',
-  },
-  {
-    id: 'q6',
-    text: 'الناجح ليس من يربح كل صفقة، بل من يحسن إدارة نقاط الخروج والتعادل بذكاء.',
-    author: 'عقلية النمو',
+    id: 'phrase_5',
+    text: '«الفرص تتجدد كل دقيقة، فلا تجعل تفويت فرصة يدفعك لصفقة غير مدروسة»',
+    category: 'discipline',
+    author: 'استراتيجيات السكالبينج',
   },
 ];
+
+export const DEFAULT_SPLASH_SETTINGS: SplashSettings = {
+  enabled: true,
+  durationSeconds: 4,
+  allowSkip: true,
+  showOncePerSession: false,
+  phrases: DEFAULT_SPLASH_PHRASES,
+};

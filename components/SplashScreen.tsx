@@ -1,225 +1,259 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, TrendingUp, ShieldCheck, Zap, X } from 'lucide-react';
 import { 
-  SplashQuote, 
-  DEFAULT_SPLASH_QUOTES, 
-  STORAGE_KEY_SPLASH_QUOTES, 
+  SplashSettings, 
+  DEFAULT_SPLASH_SETTINGS, 
   STORAGE_KEY_SPLASH_SETTINGS, 
-  SplashSettings 
+  SESSION_KEY_SPLASH_SHOWN,
+  SplashPhrase 
 } from '@/types/splash';
+import { Sparkles, ArrowRight, ShieldCheck, Zap, Activity } from 'lucide-react';
 
 interface SplashScreenProps {
-  isReady?: boolean;
-  onFinish: () => void;
+  forceShow?: boolean;
+  onFinish?: () => void;
 }
 
-export function SplashScreen({ isReady = false, onFinish }: SplashScreenProps) {
-  // Lazy state initializers to prevent cascading renders
-  const [quotes] = useState<SplashQuote[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY_SPLASH_QUOTES);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch {}
-    }
-    return DEFAULT_SPLASH_QUOTES;
-  });
+export const SplashScreen: React.FC<SplashScreenProps> = ({
+  forceShow = false,
+  onFinish,
+}) => {
+  const [isVisible, setIsVisible] = useState<boolean>(true);
+  const [progress, setProgress] = useState<number>(0);
+  const [selectedPhrase, setSelectedPhrase] = useState<SplashPhrase | null>(null);
+  const [settings, setSettings] = useState<SplashSettings>(DEFAULT_SPLASH_SETTINGS);
 
-  const [settings] = useState<SplashSettings>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY_SPLASH_SETTINGS);
-        if (saved) {
-          return { enabled: true, durationSeconds: 4, autoDismissOnReady: true, ...JSON.parse(saved) };
-        }
-      } catch {}
-    }
-    return { enabled: true, durationSeconds: 4, autoDismissOnReady: true };
-  });
-
-  const [quoteIndex, setQuoteIndex] = useState(() => {
-    return Math.floor(Math.random() * (DEFAULT_SPLASH_QUOTES.length || 1));
-  });
-
-  const [progress, setProgress] = useState(0);
-  const [isExiting, setIsExiting] = useState(false);
-
-  // Handle dismiss declared first before any effects
-  const handleDismiss = useCallback(() => {
-    setIsExiting((prev) => {
-      if (prev) return true;
-      setTimeout(() => {
-        onFinish();
-      }, 400);
-      return true;
-    });
+  const handleComplete = useCallback(() => {
+    setIsVisible(false);
+    onFinish?.();
   }, [onFinish]);
 
-  // Rotate quotes every 2.5 seconds if more than 1
+  const handleSkip = useCallback(() => {
+    setProgress(100);
+    setIsVisible(false);
+    onFinish?.();
+  }, [onFinish]);
+
+  // Initialize and select random motivational phrase
   useEffect(() => {
-    if (quotes.length <= 1) return;
-    const interval = setInterval(() => {
-      setQuoteIndex((prev) => (prev + 1) % quotes.length);
-    }, 2500);
-    return () => clearInterval(interval);
-  }, [quotes.length]);
+    const timer = setTimeout(() => {
+      // 1. Check session flag if not forced
+      if (!forceShow) {
+        try {
+          const rawSettings = localStorage.getItem(STORAGE_KEY_SPLASH_SETTINGS);
+          const parsedSettings: SplashSettings = rawSettings ? JSON.parse(rawSettings) : DEFAULT_SPLASH_SETTINGS;
+          setSettings(parsedSettings);
 
-  const durationMs = Math.max(1500, (settings.durationSeconds || 4) * 1000);
+          if (!parsedSettings.enabled) {
+            dismissPreloader();
+            setIsVisible(false);
+            onFinish?.();
+            return;
+          }
 
-  // Progress ticker
-  useEffect(() => {
-    const start = Date.now();
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - start;
-      const pct = Math.min(100, Math.round((elapsed / durationMs) * 100));
-      setProgress(pct);
-
-      if (pct >= 100) {
-        clearInterval(interval);
-        handleDismiss();
+          if (parsedSettings.showOncePerSession) {
+            const shown = sessionStorage.getItem(SESSION_KEY_SPLASH_SHOWN);
+            if (shown === 'true') {
+              dismissPreloader();
+              setIsVisible(false);
+              onFinish?.();
+              return;
+            }
+          }
+        } catch {
+          // Fallback to default
+        }
       }
-    }, 40);
 
-    return () => clearInterval(interval);
-  }, [durationMs, handleDismiss]);
+      // 2. Select phrase
+      try {
+        const phrases = settings.phrases && settings.phrases.length > 0 ? settings.phrases : DEFAULT_SPLASH_SETTINGS.phrases;
+        const randomIndex = Math.floor(Math.random() * phrases.length);
+        setSelectedPhrase(phrases[randomIndex]);
+      } catch {
+        setSelectedPhrase(DEFAULT_SPLASH_SETTINGS.phrases[0]);
+      }
 
-  // Fast-track exit when app is ready and progress is sufficiently primed
+      // 3. Mark session shown
+      try {
+        sessionStorage.setItem(SESSION_KEY_SPLASH_SHOWN, 'true');
+      } catch {}
+
+      // 4. Remove initial inline blocking HTML preloader if present, handing over seamlessly
+      dismissPreloader();
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [forceShow, settings.phrases, onFinish]);
+
+  // Handle smooth 4-second progress ticker
   useEffect(() => {
-    if (isReady && settings.autoDismissOnReady) {
-      const timeout = setTimeout(() => {
-        handleDismiss();
-      }, 800);
-      return () => clearTimeout(timeout);
-    }
-  }, [isReady, settings.autoDismissOnReady, handleDismiss]);
+    if (!isVisible) return;
 
-  const currentQuote = quotes[quoteIndex] || DEFAULT_SPLASH_QUOTES[0];
+    const durationSec = settings.durationSeconds || 4;
+    const intervalMs = 40; // 25 updates per second
+    const totalSteps = (durationSec * 1000) / intervalMs;
+    const increment = 100 / totalSteps;
+
+    const timer = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 100) {
+          clearInterval(timer);
+          setTimeout(() => {
+            handleComplete();
+          }, 200);
+          return 100;
+        }
+        return Math.min(100, prev + increment);
+      });
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [isVisible, settings.durationSeconds, handleComplete]);
+
+  if (!isVisible) return null;
 
   return (
     <AnimatePresence>
-      {!isExiting && (
-        <motion.div
-          key="splash-screen"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0, scale: 1.03, filter: 'blur(8px)' }}
-          transition={{ duration: 0.4 }}
-          className="fixed inset-0 z-50 flex flex-col items-center justify-between bg-gradient-to-b from-[#0a0c10] via-[#0d1117] to-[#08090d] text-slate-100 select-none overflow-hidden p-6"
-          dir="rtl"
-        >
-          {/* Subtle Ambient Background Glow */}
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[550px] bg-amber-500/10 rounded-full blur-[140px] pointer-events-none" />
-          <div className="absolute bottom-10 right-1/4 w-[380px] h-[380px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
+      <motion.div
+        initial={{ opacity: 1 }}
+        exit={{ opacity: 0, scale: 1.02 }}
+        transition={{ duration: 0.45, ease: 'easeInOut' }}
+        className="fixed inset-0 z-[99999] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col justify-between items-center p-6 select-none overflow-hidden"
+        dir="rtl"
+      >
+        {/* Background ambient glow effect */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[550px] bg-amber-500/10 rounded-full blur-3xl animate-pulse" />
+          <div className="absolute bottom-10 right-1/4 w-[350px] h-[350px] bg-emerald-500/10 rounded-full blur-3xl" />
+          {/* Subtle grid pattern */}
+          <div 
+            className="absolute inset-0 opacity-[0.03]" 
+            style={{ 
+              backgroundImage: 'radial-gradient(circle at 1px 1px, #ffffff 1px, transparent 0)', 
+              backgroundSize: '32px 32px' 
+            }} 
+          />
+        </div>
 
-          {/* Top Bar with Skip Button */}
-          <div className="w-full max-w-4xl flex items-center justify-between z-10 pt-2">
-            <div className="flex items-center gap-2 text-xs font-mono text-amber-400/80 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-full shadow-inner">
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span>إصدار احترافي V2.0</span>
-            </div>
+        {/* Top Header with Skip Button */}
+        <div className="w-full max-w-md flex items-center justify-between z-10 pt-2">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-ping" />
+            <span className="text-xs font-mono font-medium text-slate-400">V2.0 LIVE</span>
+          </div>
 
+          {settings.allowSkip && (
             <button
-              onClick={handleDismiss}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700/60 shadow-lg text-xs font-medium transition-all transform active:scale-95 cursor-pointer backdrop-blur-md"
-              title="تخطي شاشة البداية"
+              type="button"
+              onClick={handleSkip}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 shadow-sm transition-all cursor-pointer group"
             >
               <span>تخطي</span>
-              <X className="w-3.5 h-3.5 text-slate-400" />
+              <ArrowRight className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
             </button>
-          </div>
+          )}
+        </div>
 
-          {/* Center Brand Emblem & Title */}
-          <div className="flex flex-col items-center justify-center text-center my-auto z-10 px-4">
-            {/* Animated Golden Pulse Ring Emblem */}
-            <div className="relative mb-6">
-              <motion.div
-                animate={{ scale: [1, 1.08, 1], rotate: [0, 5, -5, 0] }}
-                transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-                className="w-24 h-24 rounded-2xl bg-gradient-to-tr from-amber-600 via-yellow-500 to-amber-300 p-0.5 shadow-[0_0_40px_rgba(245,158,11,0.35)] flex items-center justify-center"
-              >
-                <div className="w-full h-full rounded-[14px] bg-[#0c1017] flex items-center justify-center relative overflow-hidden">
-                  <div className="absolute inset-0 bg-gradient-to-br from-amber-500/20 to-transparent" />
-                  <TrendingUp className="w-12 h-12 text-amber-400 drop-shadow-[0_0_12px_rgba(251,191,36,0.6)]" />
+        {/* Center Section: App Brand & Surge Animation */}
+        <div className="flex flex-col items-center justify-center text-center my-auto max-w-md z-10 px-4">
+          {/* Glowing Animated Icon Container */}
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+            className="relative mb-6"
+          >
+            {/* Outer rotating pulse rings */}
+            <div className="absolute -inset-4 rounded-3xl bg-gradient-to-r from-amber-500/20 via-yellow-400/20 to-emerald-500/20 blur-xl animate-spin" style={{ animationDuration: '8s' }} />
+            
+            <div className="relative w-24 h-24 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-1 border-2 border-amber-400/40 shadow-2xl flex items-center justify-center shadow-amber-500/10">
+              <div className="w-full h-full rounded-[22px] bg-slate-950/90 flex flex-col items-center justify-center overflow-hidden relative">
+                <Zap className="w-10 h-10 text-amber-400 fill-amber-400/20 drop-shadow-[0_0_12px_rgba(245,158,11,0.6)] animate-bounce" />
+                <div className="absolute bottom-1 text-[8px] font-black tracking-widest text-amber-300 font-mono">
+                  BOT V2
                 </div>
-              </motion.div>
-              <span className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 text-black flex items-center justify-center text-[10px] font-black border-2 border-[#0a0c10] shadow">
-                2
-              </span>
+              </div>
             </div>
+          </motion.div>
 
-            {/* App Title */}
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2 mb-1.5">
-              <span>بوت مراقبة صعود العملات</span>
-              <span className="text-amber-400 text-lg sm:text-xl font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
-                PRO
-              </span>
+          {/* App Title */}
+          <motion.div
+            initial={{ y: 15, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.15, duration: 0.5 }}
+          >
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center justify-center gap-2">
+              <span>بوت(٢) مراقبة صعود العملات</span>
             </h1>
+            <p className="text-xs sm:text-sm font-medium text-amber-400/90 mt-1 flex items-center justify-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <span>الرصد اللحظي • حاسبة التعادل • قناص السكالبينج</span>
+            </p>
+          </motion.div>
 
-            <p className="text-xs sm:text-sm text-slate-400 max-w-md font-normal leading-relaxed mb-6">
-              نظام رصد القيعان، اقتناص الصعود اللحظي، وإدارة الصفقات مع المزامنة السحابية
+          {/* Dynamic Motivational Phrase Box */}
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.3, duration: 0.6 }}
+            className="mt-8 p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl backdrop-blur-md relative max-w-sm w-full"
+          >
+            <div className="absolute -top-3 right-4 bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1 shadow-sm">
+              <Sparkles className="w-3 h-3 fill-current" />
+              <span>حكمة التداول</span>
+            </div>
+            
+            <p className="text-sm font-semibold text-slate-200 leading-relaxed pt-1 min-h-[50px] flex items-center justify-center text-center">
+              {selectedPhrase?.text || DEFAULT_SPLASH_SETTINGS.phrases[0].text}
             </p>
 
-            {/* Dynamic Animated Quote Card */}
-            <div className="w-full max-w-lg min-h-[88px] flex items-center justify-center bg-slate-900/60 border border-slate-800/80 rounded-2xl px-5 py-3.5 shadow-2xl backdrop-blur-md">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={currentQuote.id + currentQuote.text}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.3 }}
-                  className="flex flex-col items-center text-center"
-                >
-                  <p className="text-xs sm:text-sm text-amber-100/90 font-medium leading-relaxed">
-                    &ldquo;{currentQuote.text}&rdquo;
-                  </p>
-                  {currentQuote.author && (
-                    <span className="text-[11px] text-amber-400/80 mt-1.5 font-mono">
-                      — {currentQuote.author}
-                    </span>
-                  )}
-                </motion.div>
-              </AnimatePresence>
-            </div>
+            {selectedPhrase?.author && (
+              <p className="text-[11px] text-amber-400/80 font-medium text-left mt-2">
+                — {selectedPhrase.author}
+              </p>
+            )}
+          </motion.div>
+        </div>
+
+        {/* Bottom Section: Progress Bar & Status */}
+        <div className="w-full max-w-md z-10 pb-4">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-2 font-mono">
+            <span className="flex items-center gap-1 text-slate-300">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>جاري تهيئة الرادار والمؤشرات...</span>
+            </span>
+            <span className="font-bold text-amber-400">{Math.round(progress)}%</span>
           </div>
 
-          {/* Bottom Progress & Status Bar */}
-          <div className="w-full max-w-md flex flex-col items-center gap-2.5 z-10 pb-4">
-            <div className="w-full flex items-center justify-between text-[11px] text-slate-400 px-1 font-mono">
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                {progress < 40 ? 'تهيئة بيئة التداول...' : progress < 80 ? 'توصيل البث الحي لـ Binance...' : 'جاهز للانطلاق!'}
-              </span>
-              <span className="text-amber-400 font-bold">{progress}%</span>
-            </div>
-
-            {/* Progress Bar Line */}
-            <div className="w-full h-1.5 bg-slate-800/80 rounded-full overflow-hidden border border-slate-700/50 p-0.5 shadow-inner">
-              <motion.div
-                className="h-full bg-gradient-to-r from-amber-500 via-yellow-400 to-emerald-400 rounded-full shadow-[0_0_12px_rgba(251,191,36,0.6)]"
-                style={{ width: `${progress}%` }}
-                transition={{ ease: 'linear' }}
-              />
-            </div>
-
-            <div className="flex items-center gap-4 text-[10px] text-slate-500 pt-1">
-              <span className="flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3 text-emerald-400" /> مشفر ومحلي أولاً
-              </span>
-              <span>•</span>
-              <span className="flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-amber-400" /> لا استهلاك للحصة المجانية
-              </span>
-            </div>
+          {/* Progress track */}
+          <div className="w-full h-2 rounded-full bg-slate-800/80 p-0.5 overflow-hidden border border-slate-700/50">
+            <motion.div
+              className="h-full rounded-full bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400 shadow-[0_0_10px_rgba(245,158,11,0.5)] transition-all duration-75 ease-out"
+              style={{ width: `${progress}%` }}
+            />
           </div>
-        </motion.div>
-      )}
+
+          <p className="text-center text-[11px] text-slate-500 mt-3 font-medium">
+            تطبيق بوتات مراقبة العملات وإجراء الصفقات • إصدار 2.0
+          </p>
+        </div>
+      </motion.div>
     </AnimatePresence>
   );
+};
+
+function dismissPreloader(): void {
+  if (typeof document === 'undefined') return;
+  const preloader = document.getElementById('app-splash-preloader');
+  if (preloader) {
+    preloader.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+    preloader.style.opacity = '0';
+    preloader.style.pointerEvents = 'none';
+    setTimeout(() => {
+      preloader.remove();
+    }, 400);
+  }
 }

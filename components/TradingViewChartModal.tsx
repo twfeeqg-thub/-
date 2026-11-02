@@ -33,7 +33,9 @@ import {
   Layers,
   LayoutList,
   FileText,
-  Bookmark
+  Bookmark,
+  Activity,
+  BarChart3
 } from 'lucide-react';
 import { CoinAvatar } from './CoinAvatar';
 import { trimTrailingZeros } from '@/lib/calculator';
@@ -41,6 +43,27 @@ import { useTheme } from '@/context/ThemeContext';
 import { systemNotification } from '@/lib/systemNotification';
 import { soundAlert } from '@/lib/soundAlert';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
+
+export interface TechnicalIndicatorConfig {
+  id: string;
+  name: string;
+  shortName: string;
+  description: string;
+  category: string;
+}
+
+export const POPULAR_INDICATORS: TechnicalIndicatorConfig[] = [
+  { id: 'Volume@tv-basicstudies', name: 'حجم التداول (Volume)', shortName: 'VOL', description: 'أعمدة سيولة التداول والسيولة اللحظية', category: 'السيولة' },
+  { id: 'RSI@tv-basicstudies', name: 'مؤشر القوة النسبية (RSI 14)', shortName: 'RSI', description: 'مناطق ذروة الشراء والبيع والتشبع السعري', category: 'الزخم' },
+  { id: 'MACD@tv-basicstudies', name: 'الماكد (MACD)', shortName: 'MACD', description: 'تقاطعات متوسطات الزخم وإشارات الانعكاس', category: 'الزخم' },
+  { id: 'MAExp@tv-basicstudies', name: 'المتوسط المتحرك الأسي (EMA)', shortName: 'EMA', description: 'متوسط الاتجاه الأسي السريع', category: 'الاتجاه' },
+  { id: 'MASimple@tv-basicstudies', name: 'المتوسط المتحرك البسيط (SMA)', shortName: 'SMA', description: 'متوسط الاتجاه الكلاسيكي العام', category: 'الاتجاه' },
+  { id: 'BB@tv-basicstudies', name: 'بولنجر باندز (Bollinger Bands)', shortName: 'BB', description: 'نطاقات الانحراف المعياري وتذبذب السعر', category: 'التقلب' },
+  { id: 'Stochastic@tv-basicstudies', name: 'ستوكاستيك (Stochastic)', shortName: 'STOCH', description: 'تحديد مستويات التشبع والارتدادات السريعة', category: 'الزخم' },
+];
+
+export const STORAGE_KEY_PERSISTENT_STUDIES = 'tv_persistent_studies';
+export const STORAGE_KEY_CHART_INTERVAL = 'tv_chart_interval';
 
 export interface CustomChartLine {
   id: string;
@@ -149,6 +172,64 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   const cleanSymbol = symbol.trim().toUpperCase();
   const binanceSymbol = cleanSymbol.endsWith('USDT') ? cleanSymbol : `${cleanSymbol}USDT`;
   const baseAsset = currencyName.trim().toUpperCase() || binanceSymbol.replace('USDT', '');
+
+  // Persistent Technical Indicators across ALL charts and currencies
+  const [activeStudies, setActiveStudies] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return ['Volume@tv-basicstudies', 'RSI@tv-basicstudies'];
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PERSISTENT_STUDIES);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Ignore
+    }
+    return ['Volume@tv-basicstudies', 'RSI@tv-basicstudies'];
+  });
+
+  const [showIndicatorsPanel, setShowIndicatorsPanel] = useState<boolean>(false);
+
+  // Persistent Timeframe Interval
+  const [chartInterval, setChartInterval] = useState<string>(() => {
+    if (typeof window === 'undefined') return '15';
+    try {
+      return localStorage.getItem(STORAGE_KEY_CHART_INTERVAL) || '15';
+    } catch {
+      return '15';
+    }
+  });
+
+  const handleToggleStudy = useCallback((studyId: string) => {
+    setActiveStudies((prev) => {
+      const next = prev.includes(studyId) ? prev.filter((id) => id !== studyId) : [...prev, studyId];
+      try {
+        localStorage.setItem(STORAGE_KEY_PERSISTENT_STUDIES, JSON.stringify(next));
+      } catch {
+        // Ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const handleResetStudies = useCallback(() => {
+    const defaults = ['Volume@tv-basicstudies', 'RSI@tv-basicstudies'];
+    setActiveStudies(defaults);
+    try {
+      localStorage.setItem(STORAGE_KEY_PERSISTENT_STUDIES, JSON.stringify(defaults));
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  const handleSelectInterval = useCallback((newInterval: string) => {
+    setChartInterval(newInterval);
+    try {
+      localStorage.setItem(STORAGE_KEY_CHART_INTERVAL, newInterval);
+    } catch {
+      // Ignore
+    }
+  }, []);
 
   // Numeric Values
   const entryNum = entryPrice ? parseFloat(entryPrice) : NaN;
@@ -830,13 +911,16 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     }
   };
 
-  // Official isolated TradingView embed URL with Binance feed & dynamic theme
+  // Official isolated TradingView embed URL with Binance feed & dynamic theme & persistent technical studies
   const iframeSrc = useMemo(() => {
     const toolbarColor = isDark ? '0f172a' : 'ffffff';
+    const studiesParam = activeStudies.length > 0 
+      ? `&studies=${encodeURIComponent(JSON.stringify(activeStudies))}` 
+      : '';
     return `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_advanced_chart&symbol=BINANCE%3A${encodeURIComponent(
       binanceSymbol
-    )}&interval=15&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=${toolbarColor}&theme=${chartTheme}&style=1&timezone=Etc%2FUTC&locale=ar_AE&allow_symbol_change=1&details=1&withdateranges=1`;
-  }, [binanceSymbol, chartTheme, isDark]);
+    )}&interval=${chartInterval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=${toolbarColor}&theme=${chartTheme}&style=1&timezone=Etc%2FUTC&locale=ar_AE&allow_symbol_change=1&details=1&withdateranges=1${studiesParam}`;
+  }, [binanceSymbol, chartTheme, isDark, chartInterval, activeStudies]);
 
   if (!isOpen) return null;
 
@@ -990,8 +1074,25 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 )}
               </div>
 
-              {/* Left: Line Actions & Chart Tools */}
+              {/* Left: Line Actions, Indicators & Chart Tools */}
               <div className="flex items-center gap-1.5">
+                {/* Persistent Technical Indicators Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowIndicatorsPanel((prev) => !prev)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-bold text-xs transition border cursor-pointer ${
+                    showIndicatorsPanel
+                      ? 'bg-purple-600 text-white border-purple-400 font-black shadow-sm ring-2 ring-purple-400/40'
+                      : activeStudies.length > 0
+                      ? 'bg-purple-500/15 border-purple-500/40 text-purple-600 dark:text-purple-300 hover:bg-purple-500/25'
+                      : isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'
+                  }`}
+                  title="المؤشرات الفنية المحفوظة دائماً لجميع العملات"
+                >
+                  <Activity className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="text-[11px]">المؤشرات ({activeStudies.length})</span>
+                </button>
+
                 {/* Draw Custom Line Button */}
                 <button
                   type="button"
@@ -1107,73 +1208,169 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               </div>
             </div>
 
-            {/* Row 2: Direct Screen Integrations Navigation Strip */}
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 border-t text-xs overflow-x-auto ${
+            {/* Row 2: Direct Screen Integrations & Timeframe Picker */}
+            <div className={`flex items-center justify-between gap-2 px-3 py-1.5 border-t text-xs overflow-x-auto ${
               isDark ? 'bg-slate-950/70 border-slate-800/80' : 'bg-slate-100/80 border-slate-200'
             }`}>
-              <span className="text-[11px] font-bold text-slate-400 shrink-0 ml-1">التنقل السريع لنفس العملة ({baseAsset}):</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[11px] font-bold text-slate-400 shrink-0 ml-1">التنقل السريع ({baseAsset}):</span>
 
-              {onNavigateToCalculator && (
-                <button
-                  type="button"
-                  onClick={() => onNavigateToCalculator(baseAsset, entryPrice || livePrice)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 dark:text-amber-300 border border-amber-500/40 font-bold transition cursor-pointer shrink-0"
-                  title="فتح هذه العملة في حاسبة التعادل"
-                >
-                  <Calculator className="w-3.5 h-3.5 text-amber-500" />
-                  <span>حاسبة التعادل</span>
-                </button>
-              )}
+                {onNavigateToCalculator && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToCalculator(baseAsset, entryPrice || livePrice)}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 dark:text-amber-300 border border-amber-500/40 font-bold transition cursor-pointer shrink-0 text-[11px]"
+                    title="فتح هذه العملة في حاسبة التعادل"
+                  >
+                    <Calculator className="w-3 h-3 text-amber-500" />
+                    <span>حاسبة التعادل</span>
+                  </button>
+                )}
 
-              {onNavigateToRangeMaster && (
-                <button
-                  type="button"
-                  onClick={() => onNavigateToRangeMaster(baseAsset)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-600 dark:text-cyan-300 border border-cyan-500/40 font-bold transition cursor-pointer shrink-0"
-                  title="فتح هذه العملة في صائد القيعان"
-                >
-                  <Layers className="w-3.5 h-3.5 text-cyan-500" />
-                  <span>صائد القيعان</span>
-                </button>
-              )}
+                {onNavigateToRangeMaster && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToRangeMaster(baseAsset)}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-600 dark:text-cyan-300 border border-cyan-500/40 font-bold transition cursor-pointer shrink-0 text-[11px]"
+                    title="فتح هذه العملة في صائد القيعان"
+                  >
+                    <Layers className="w-3 h-3 text-cyan-500" />
+                    <span>صائد القيعان</span>
+                  </button>
+                )}
 
-              {onNavigateToScalper && (
-                <button
-                  type="button"
-                  onClick={() => onNavigateToScalper(baseAsset)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-300 border border-emerald-500/40 font-bold transition cursor-pointer shrink-0"
-                  title="فتح هذه العملة في لوحة السكالبينج"
-                >
-                  <Zap className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>السكالبينج</span>
-                </button>
-              )}
+                {onNavigateToTracker && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToTracker(baseAsset)}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-300 border border-purple-500/40 font-bold transition cursor-pointer shrink-0 text-[11px]"
+                    title="فتح هذه العملة في رصد الصعود"
+                  >
+                    <TrendingUp className="w-3 h-3 text-purple-500" />
+                    <span>رصد الصعود</span>
+                  </button>
+                )}
 
-              {onNavigateToTracker && (
-                <button
-                  type="button"
-                  onClick={() => onNavigateToTracker(baseAsset)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-300 border border-purple-500/40 font-bold transition cursor-pointer shrink-0"
-                  title="فتح هذه العملة في رصد الصعود"
-                >
-                  <TrendingUp className="w-3.5 h-3.5 text-purple-500" />
-                  <span>رصد الصعود</span>
-                </button>
-              )}
+                {onNavigateToWatchlist && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToWatchlist}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-600 dark:text-blue-300 border border-blue-500/40 font-bold transition cursor-pointer shrink-0 text-[11px]"
+                    title="العودة لقائمة المراقبة"
+                  >
+                    <LayoutList className="w-3 h-3 text-blue-500" />
+                    <span>قائمة المراقبة</span>
+                  </button>
+                )}
+              </div>
 
-              {onNavigateToWatchlist && (
-                <button
-                  type="button"
-                  onClick={onNavigateToWatchlist}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-600 dark:text-blue-300 border border-blue-500/40 font-bold transition cursor-pointer shrink-0"
-                  title="العودة لقائمة المراقبة"
-                >
-                  <LayoutList className="w-3.5 h-3.5 text-blue-500" />
-                  <span>قائمة المراقبة</span>
-                </button>
-              )}
+              {/* Timeframe Interval Selector */}
+              <div className="flex items-center gap-1 shrink-0 mr-auto">
+                <span className="text-[10px] font-bold text-slate-400">الفريم:</span>
+                {[
+                  { id: '1', label: '1د' },
+                  { id: '5', label: '5د' },
+                  { id: '15', label: '15د' },
+                  { id: '60', label: '1س' },
+                  { id: '240', label: '4س' },
+                  { id: 'D', label: 'يومي' },
+                ].map((tf) => (
+                  <button
+                    key={tf.id}
+                    type="button"
+                    onClick={() => handleSelectInterval(tf.id)}
+                    className={`px-2 py-0.5 rounded-md font-mono text-[11px] font-bold transition cursor-pointer ${
+                      chartInterval === tf.id
+                        ? 'bg-amber-400 text-slate-950 font-black shadow-2xs'
+                        : isDark ? 'bg-slate-800 text-slate-300 hover:text-white' : 'bg-slate-200 text-slate-700 hover:text-slate-950'
+                    }`}
+                  >
+                    {tf.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </header>
+        )}
+
+        {/* ========================================================================= */}
+        {/* PERSISTENT TECHNICAL INDICATORS DRAWER (حفظ المؤشرات لجميع الشارتات)      */}
+        {/* ========================================================================= */}
+        {showIndicatorsPanel && (
+          <div 
+            className={`border-b p-3 shrink-0 transition-all ${
+              isDark ? 'bg-slate-950/95 border-purple-900/60' : 'bg-purple-50/90 border-purple-200'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-purple-500" />
+                <span className="font-black text-xs text-slate-900 dark:text-slate-100">
+                  المؤشرات الفنية المحفوظة دائماً (تُحفظ تلقائياً وتظهر على شارت أي عملة تفتحها):
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetStudies}
+                  className="text-[11px] text-slate-400 hover:text-purple-400 cursor-pointer font-bold underline"
+                >
+                  استعادة الافتراضي
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowIndicatorsPanel(false)}
+                  className="text-xs text-slate-400 hover:text-purple-500 cursor-pointer font-bold px-1.5 py-0.5 rounded hover:bg-slate-800"
+                >
+                  إغلاق ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+              {POPULAR_INDICATORS.map((ind) => {
+                const isSelected = activeStudies.includes(ind.id);
+                return (
+                  <button
+                    key={ind.id}
+                    type="button"
+                    onClick={() => handleToggleStudy(ind.id)}
+                    className={`p-2 rounded-xl border text-right transition-all flex items-start justify-between cursor-pointer ${
+                      isSelected
+                        ? 'bg-purple-600/20 border-purple-500/70 text-purple-900 dark:text-purple-200 shadow-xs'
+                        : isDark
+                        ? 'bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                        : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:text-slate-900'
+                    }`}
+                  >
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-[9px] font-black px-1 rounded ${
+                          isSelected ? 'bg-purple-500 text-white' : 'bg-slate-700 text-slate-300'
+                        }`}>
+                          {ind.shortName}
+                        </span>
+                        <span className="font-bold text-xs">{ind.name}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                        {ind.description}
+                      </span>
+                    </div>
+
+                    <span className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 mt-0.5 border text-[10px] font-black ${
+                      isSelected ? 'bg-purple-500 border-purple-400 text-white' : 'border-slate-600'
+                    }`}>
+                      {isSelected ? '✓' : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-2 text-[10px] text-purple-600 dark:text-purple-300 flex items-center gap-1">
+              <span>💡</span>
+              <span>المؤشرات التي تختارها هنا تظل ثابتة ومحفوظة في المتصفح وتظهر تلقائياً على كل شارت لأي عملة ولا تختفي أبداً عند الخروج.</span>
+            </div>
+          </div>
         )}
 
         {/* ========================================================================= */}
@@ -1256,41 +1453,8 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
           onContextMenu={handleContextMenu}
           className={`relative flex-1 w-full h-full min-h-[350px] ${isDark ? 'bg-slate-950' : 'bg-white'}`}
         >
-          {/* Quick Floating Toolbar for Custom Lines & Memos */}
-          <div 
-            style={{
-              position: 'absolute',
-              top: '12px',
-              left: '12px',
-            }}
-            className="z-35 flex items-center gap-1.5 p-1 rounded-xl backdrop-blur-md border shadow-lg bg-slate-900/90 border-slate-700/80 text-[11px] font-bold select-none"
-          >
-            <button
-              type="button"
-              onClick={() => handleOpenAddLine()}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white shadow-xs font-black transition cursor-pointer"
-              title="رسم وإضافة خط أو مذكرة سعرية لهذه العملة"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>رسم خط ومذكرة ✍️</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowLinesDock((prev) => !prev)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-lg transition cursor-pointer ${
-                showLinesDock 
-                  ? 'bg-amber-500 text-slate-950 font-black shadow-xs' 
-                  : 'text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800'
-              }`}
-              title="عرض مكتبة خطوط ومذكرات هذه العملة"
-            >
-              <Bookmark className="w-3.5 h-3.5 text-amber-400" />
-              <span>المذكرات ({customLines.length})</span>
-            </button>
-          </div>
-
           <iframe
-            key={`${binanceSymbol}-${chartTheme}`}
+            key={`${binanceSymbol}-${chartTheme}-${chartInterval}-${activeStudies.join(',')}`}
             src={iframeSrc}
             className="w-full h-full border-0 block pointer-events-auto"
             title={`TradingView Chart for ${binanceSymbol}`}

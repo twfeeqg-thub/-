@@ -11,7 +11,8 @@ import {
   ArrowUpRight, 
   Info,
   FolderSync,
-  Trash2
+  Trash2,
+  Layers
 } from 'lucide-react';
 import { WatchlistItem, WatchlistFlagColor, WatchlistCategory } from '@/types/watchlist';
 import { CoinAvatar } from './CoinAvatar';
@@ -338,7 +339,7 @@ export const WatchlistActionModal: React.FC<WatchlistActionModalProps> = ({
             <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-amber-500 transition" />
           </button>
 
-          {/* Action 3: فتح في لوحة السكالبينج */}
+          {/* Action 3: فتح في صائد القيعان */}
           <button
             type="button"
             onClick={() => {
@@ -348,19 +349,19 @@ export const WatchlistActionModal: React.FC<WatchlistActionModalProps> = ({
             className="w-full p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 border border-slate-300 dark:border-slate-700 flex items-center justify-between text-right transition cursor-pointer group"
           >
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold">
-                <Zap className="w-4 h-4 group-hover:scale-110 transition" />
+              <div className="w-9 h-9 rounded-xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold">
+                <Layers className="w-4 h-4 group-hover:scale-110 transition" />
               </div>
               <div>
                 <span className="font-black text-sm text-slate-950 dark:text-slate-50 block leading-tight">
-                  ٣. فتح في لوحة السكالبينج السريعة
+                  ٣. فتح في صائد القيعان
                 </span>
                 <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
-                  رصد أدنى قاع وتأكيد الارتداد السريع
+                  رصد أدنى قاع والمسار العرضي وتأكيد الارتداد
                 </span>
               </div>
             </div>
-            <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-500 transition" />
+            <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-cyan-500 transition" />
           </button>
 
           {/* Action 4: ضبط تنبيه سعري فوري */}
