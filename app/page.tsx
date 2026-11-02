@@ -47,6 +47,11 @@ import { RangeScalperDashboard } from '@/components/RangeScalperDashboard';
 import { MarketSessionsTopBar } from '@/components/MarketSessionsTopBar';
 import { BinanceQuickWidget, STORAGE_KEY_BINANCE_FAB_HIDDEN } from '@/components/BinanceQuickWidget';
 import { TradingViewChartModal } from '@/components/TradingViewChartModal';
+import { SplashScreen } from '@/components/SplashScreen';
+import { AccountDashboard } from '@/components/AccountDashboard';
+import { EVENT_CLOUD_RESTORED } from '@/lib/cloudSync';
+import { STORAGE_KEY_SPLASH_SETTINGS } from '@/types/splash';
+import { useAuth } from '@/context/AuthContext';
 import { 
   WatchlistItem, 
   WatchlistCategory, 
@@ -56,11 +61,25 @@ import {
 } from '@/types/watchlist';
 import { systemNotification } from '@/lib/systemNotification';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
-import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList, Layers } from 'lucide-react';
+import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList, Layers, UserCircle2 } from 'lucide-react';
 
 export default function CalculatorPage() {
-  // Navigation Tabs: 'calculator' | 'tracker' | 'scalper' | 'watchlist' | 'range_master'
-  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'tracker' | 'scalper' | 'watchlist' | 'range_master'>('range_master');
+  const { user, profile } = useAuth();
+  const [showSplash, setShowSplash] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedSplashSettings = localStorage.getItem(STORAGE_KEY_SPLASH_SETTINGS);
+        if (savedSplashSettings) {
+          const parsed = JSON.parse(savedSplashSettings);
+          if (parsed.enabled === false) return false;
+        }
+      } catch {}
+    }
+    return true;
+  });
+
+  // Navigation Tabs: 'calculator' | 'tracker' | 'scalper' | 'watchlist' | 'range_master' | 'account'
+  const [activeMainTab, setActiveMainTab] = useState<'calculator' | 'tracker' | 'scalper' | 'watchlist' | 'range_master' | 'account'>('range_master');
   const [rangeStreamSymbols, setRangeStreamSymbols] = useState<string[]>([]);
 
   const handleRegisterRangeSymbols = useCallback((symbols: string[]) => {
@@ -208,6 +227,54 @@ export default function CalculatorPage() {
 
     return () => clearTimeout(timer);
   }, []);
+
+  // Live reload all state when restored from cloud
+  const reloadAllFromStorage = useCallback(() => {
+    try {
+      const savedDefaults = localStorage.getItem(STORAGE_KEY_DEFAULTS);
+      if (savedDefaults) setDefaultFees(JSON.parse(savedDefaults));
+
+      const savedCurrencies = localStorage.getItem(STORAGE_KEY_CURRENCIES);
+      if (savedCurrencies) {
+        const parsed: CurrencyItem[] = JSON.parse(savedCurrencies);
+        if (Array.isArray(parsed)) setCurrencies(parsed.slice(0, MAX_CURRENCIES));
+      }
+
+      const savedTracker = localStorage.getItem(STORAGE_KEY_TRACKER);
+      if (savedTracker) {
+        const parsed: TrackedCurrency[] = JSON.parse(savedTracker);
+        if (Array.isArray(parsed)) setTrackedCurrencies(parsed);
+      }
+
+      const savedScalper = localStorage.getItem(STORAGE_KEY_SCALPER_TRADES);
+      if (savedScalper) {
+        const parsed: ScalpTrade[] = JSON.parse(savedScalper);
+        if (Array.isArray(parsed)) {
+          const userAddedTrades = parsed.filter((t) => !t.id.startsWith('scalp_init_'));
+          setScalpTrades(userAddedTrades);
+        }
+      }
+
+      const savedSession = localStorage.getItem(STORAGE_KEY_SCALPER_SESSION);
+      if (savedSession) setScalperSession(JSON.parse(savedSession));
+
+      const savedWatchlist = localStorage.getItem(STORAGE_KEY_WATCHLIST);
+      if (savedWatchlist) {
+        const parsed: WatchlistItem[] = JSON.parse(savedWatchlist);
+        if (Array.isArray(parsed) && parsed.length > 0) setWatchlistItems(parsed);
+      }
+    } catch (e) {
+      console.warn('Error reloading from storage:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleCloudRestored = () => {
+      reloadAllFromStorage();
+    };
+    window.addEventListener(EVENT_CLOUD_RESTORED, handleCloudRestored);
+    return () => window.removeEventListener(EVENT_CLOUD_RESTORED, handleCloudRestored);
+  }, [reloadAllFromStorage]);
 
   // Helper to persist currencies
   const persistCurrencies = useCallback((items: CurrencyItem[]) => {
@@ -1359,6 +1426,14 @@ export default function CalculatorPage() {
 
   return (
     <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 pb-28 sm:pb-32 overflow-x-clip transition-colors">
+      {/* Animated Splash Screen v2 */}
+      {showSplash && (
+        <SplashScreen
+          isReady={isTrackerStreamActive && Object.keys(trackerLivePrices).length > 0}
+          onFinish={() => setShowSplash(false)}
+        />
+      )}
+
       {/* Background Ambience and Guide */}
       <WorkspaceBackground 
         mode={activeCurrencyId && activeMainTab === 'calculator' ? windowMode : 'normal'}
@@ -1409,6 +1484,23 @@ export default function CalculatorPage() {
 
         {/* Top Action Controls */}
         <div className="flex items-center flex-wrap gap-2">
+          {/* Account & Cloud Sync Trigger */}
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('account')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
+              activeMainTab === 'account'
+                ? 'bg-amber-400 text-slate-950 border-amber-500 shadow-md font-black'
+                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+            }`}
+            title="إدارة الحساب والمزامنة السحابية v2"
+          >
+            <UserCircle2 className="w-4 h-4 text-amber-500" />
+            <span className="hidden sm:inline">
+              {user ? (profile?.displayName || user.email?.split('@')[0]) : 'الحساب v2'}
+            </span>
+            <span className={`w-2 h-2 rounded-full ${user ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+          </button>
           {/* Side-by-Side Break-Even Comparison Drawer Trigger */}
           <button
             type="button"
@@ -1722,6 +1814,13 @@ export default function CalculatorPage() {
             onRegisterSymbolsForStream={handleRegisterRangeSymbols}
           />
         )}
+
+        {/* ========================================================= */}
+        {/* TAB 6: ACCOUNT & CLOUD SYNC DASHBOARD (الحساب والإعدادات v2) */}
+        {/* ========================================================= */}
+        {activeMainTab === 'account' && (
+          <AccountDashboard />
+        )}
       </div>
 
       {/* Settings Modal */}
@@ -1767,18 +1866,52 @@ export default function CalculatorPage() {
           testPrices={activeChartItem.testPrices}
           testPriceTimestamps={activeChartItem.testPriceTimestamps}
           onClose={() => setActiveChartItem(null)}
-          onNavigateToCalculator={(name) => handleOpenCalculatorForCurrency(name)}
-          onNavigateToScalper={(name) => handleNavigateToScalperFromWatchlist(name)}
+          onNavigateToCalculator={(name, entry) => {
+            handleOpenCalculatorForCurrency(name);
+            if (entry) {
+              setCurrencies((prev) => {
+                const next = prev.map((c) => (c.name === name.trim().toUpperCase() ? { ...c, entryPrice: entry } : c));
+                persistCurrencies(next);
+                return next;
+              });
+            }
+            setActiveChartItem(null);
+          }}
+          onNavigateToScalper={(name) => {
+            handleNavigateToScalperFromWatchlist(name);
+            setActiveChartItem(null);
+          }}
+          onNavigateToRangeMaster={() => {
+            setActiveMainTab('range_master');
+            setActiveChartItem(null);
+          }}
+          onNavigateToTracker={(name) => {
+            const clean = name.trim().toUpperCase();
+            const match = trackedCurrencies.find((tc) => tc.name === clean);
+            if (match) {
+              setActiveTrackedId(match.id);
+            } else {
+              const pair = clean.endsWith('USDT') ? clean : `${clean}USDT`;
+              const liveP = trackerLivePrices[pair] || '0';
+              handleAddTrackedCurrency(clean, liveP);
+            }
+            setActiveMainTab('tracker');
+            setActiveChartItem(null);
+          }}
+          onNavigateToWatchlist={() => {
+            setActiveMainTab('watchlist');
+            setActiveChartItem(null);
+          }}
         />
       )}
 
-      {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة للعناصر الخمسة بتباين فائق) */}
+      {/* FIXED BOTTOM NAVIGATION MENU (القائمة السفلية الثابتة للعناصر الستة بتباين فائق) */}
       <nav 
         className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-300 dark:border-slate-800 py-2 px-2 sm:px-4 shadow-[0_-4px_25px_rgba(0,0,0,0.12)] dark:shadow-[0_-4px_25px_rgba(0,0,0,0.6)]"
         dir="rtl"
         aria-label="القائمة الرئيسية الثابتة"
       >
-        <div className="max-w-4xl mx-auto grid grid-cols-5 gap-1 sm:gap-2">
+        <div className="max-w-4xl mx-auto grid grid-cols-6 gap-1 sm:gap-2">
           {/* Item 1: حاسبة التجارة والتعادل */}
           <button
             type="button"
@@ -1798,7 +1931,7 @@ export default function CalculatorPage() {
             </span>
           </button>
 
-          {/* Item 2: صائد القيعان والمسار العرضي (الجديد) */}
+          {/* Item 2: صائد القيعان والمسار العرضي */}
           <button
             type="button"
             onClick={() => setActiveMainTab('range_master')}
@@ -1841,7 +1974,7 @@ export default function CalculatorPage() {
             )}
           </button>
 
-          {/* Item 4: ترجمات عاجلة (رصد صعود العملات) */}
+          {/* Item 4: رصد صعود العملات */}
           <button
             type="button"
             onClick={() => setActiveMainTab('tracker')}
@@ -1877,6 +2010,25 @@ export default function CalculatorPage() {
             }`}>
               {watchlistItems.length}
             </span>
+          </button>
+
+          {/* Item 6: الحساب والإعدادات الذكية v2 */}
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('account')}
+            className={`flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 sm:px-2 rounded-2xl transition-all cursor-pointer ${
+              activeMainTab === 'account'
+                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-500/40'
+                : 'text-slate-900 dark:text-slate-100 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+            }`}
+          >
+            <UserCircle2 className={`w-4 h-4 sm:w-5 sm:h-5 ${activeMainTab === 'account' ? 'stroke-[2.5]' : 'stroke-[2]'}`} />
+            <span className="text-[10px] sm:text-xs tracking-tight">الحساب v2</span>
+            {user ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            ) : (
+              <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-500 font-bold">ضيف</span>
+            )}
           </button>
         </div>
       </nav>

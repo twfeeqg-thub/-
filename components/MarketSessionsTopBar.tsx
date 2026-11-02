@@ -39,7 +39,7 @@ import {
 } from 'lucide-react';
 
 interface MarketSessionsTopBarProps {
-  onNavigateToScreen?: (screen: 'range_master' | 'scalper' | 'calculator' | 'tracker' | 'watchlist') => void;
+  onNavigateToScreen?: (screen: 'range_master' | 'scalper' | 'calculator' | 'tracker' | 'watchlist' | 'account') => void;
   activeScreen?: string;
   marketVolatilityDirection?: 'up' | 'down' | 'neutral';
   onRestoreBinanceFab?: () => void;

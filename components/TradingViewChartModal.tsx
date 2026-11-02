@@ -29,7 +29,11 @@ import {
   Edit2,
   X,
   GripVertical,
-  RotateCcw
+  RotateCcw,
+  Layers,
+  LayoutList,
+  FileText,
+  Bookmark
 } from 'lucide-react';
 import { CoinAvatar } from './CoinAvatar';
 import { trimTrailingZeros } from '@/lib/calculator';
@@ -45,6 +49,9 @@ export interface CustomChartLine {
   style: 'solid' | 'dashed' | 'dotted';
   thickness: 1 | 2 | 3 | 4;
   label?: string;
+  notes?: string;
+  createdAt?: number;
+  createdPriceAtTime?: number;
   textColor?: string;
   textSize?: 'sm' | 'base' | 'lg';
   hasAlert?: boolean;
@@ -67,6 +74,9 @@ interface TradingViewChartModalProps {
   onClose: () => void;
   onNavigateToCalculator?: (currencyName: string, entryPrice?: string) => void;
   onNavigateToScalper?: (symbolName: string) => void;
+  onNavigateToRangeMaster?: (symbolName: string) => void;
+  onNavigateToTracker?: (symbolName: string) => void;
+  onNavigateToWatchlist?: () => void;
 }
 
 const LINE_COLORS = [
@@ -109,6 +119,9 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   onClose,
   onNavigateToCalculator,
   onNavigateToScalper,
+  onNavigateToRangeMaster,
+  onNavigateToTracker,
+  onNavigateToWatchlist,
 }) => {
   const { resolvedTheme } = useTheme();
 
@@ -215,6 +228,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   const [lineEditorStyle, setLineEditorStyle] = useState<'solid' | 'dashed' | 'dotted'>('solid');
   const [lineEditorThickness, setLineEditorThickness] = useState<1 | 2 | 3 | 4>(2);
   const [lineEditorLabel, setLineEditorLabel] = useState<string>('');
+  const [lineEditorNotes, setLineEditorNotes] = useState<string>('');
   const [lineEditorTextColor, setLineEditorTextColor] = useState<string>('#ffffff');
   const [lineEditorTextSize, setLineEditorTextSize] = useState<'sm' | 'base' | 'lg'>('sm');
   const [lineEditorAlert, setLineEditorAlert] = useState<boolean>(false);
@@ -228,36 +242,11 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   }>({ visible: false, x: 0, y: 0 });
 
   const [showLinesManager, setShowLinesManager] = useState<boolean>(false);
-  const [chartInteractionMode, setChartInteractionMode] = useState<'draw_gesture' | 'browse_chart'>('draw_gesture');
+  const [showLinesDock, setShowLinesDock] = useState<boolean>(false);
   const chartOverlayRef = useRef<HTMLDivElement | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Floating Mode Switcher Draggable State (via Long-Press)
-  // Default position: top-left (أعلى يسار الشاشة في الجهة المقابلة لاسم العملة)
-  const [switcherPos, setSwitcherPos] = useState<{ x: number; y: number }>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('tv_chart_mode_switcher_pos');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-            return parsed;
-          }
-        }
-      } catch {
-        // Ignore
-      }
-    }
-    // Default initial coordinates: top-left (x: 12, y: 12) opposite the coin name
-    return { x: 12, y: 12 };
-  });
-
-  const [isDraggingSwitcher, setIsDraggingSwitcher] = useState(false);
-  const switcherRef = useRef<HTMLDivElement | null>(null);
-  const switcherDragTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const switcherStartPointerRef = useRef<{ clientX: number; clientY: number; initialX: number; initialY: number } | null>(null);
-  const switcherJustDraggedRef = useRef<boolean>(false);
 
   // 1. DYNAMIC IN-CHART LEVEL LINES:
   // Instead of static positions, Entry & Break-Even lines position dynamically relative to Live Price!
@@ -472,6 +461,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     setLineEditorStyle('solid');
     setLineEditorThickness(2);
     setLineEditorLabel('');
+    setLineEditorNotes('');
     setLineEditorTextColor('#ffffff');
     setLineEditorTextSize('sm');
     setLineEditorAlert(false);
@@ -486,6 +476,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     setLineEditorStyle(line.style);
     setLineEditorThickness(line.thickness);
     setLineEditorLabel(line.label || '');
+    setLineEditorNotes(line.notes || '');
     setLineEditorTextColor(line.textColor || '#ffffff');
     setLineEditorTextSize(line.textSize || 'sm');
     setLineEditorAlert(Boolean(line.hasAlert));
@@ -504,6 +495,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
         style: lineEditorStyle,
         thickness: lineEditorThickness,
         label: lineEditorLabel.trim() || undefined,
+        notes: lineEditorNotes.trim() || undefined,
         textColor: lineEditorTextColor,
         textSize: lineEditorTextSize,
         hasAlert: lineEditorAlert,
@@ -520,6 +512,9 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
         style: lineEditorStyle,
         thickness: lineEditorThickness,
         label: lineEditorLabel.trim() || undefined,
+        notes: lineEditorNotes.trim() || undefined,
+        createdAt: Date.now(),
+        createdPriceAtTime: currentPriceNum > 0 ? currentPriceNum : pNum,
         textColor: lineEditorTextColor,
         textSize: lineEditorTextSize,
         hasAlert: lineEditorAlert,
@@ -535,6 +530,26 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
       systemNotification.requestPermission();
     }
     setIsLineEditorOpen(false);
+  };
+
+  const handleToggleLineAlert = (id: string) => {
+    const next = customLines.map((l) => {
+      if (l.id === id) {
+        const nextAlert = !l.hasAlert;
+        if (nextAlert) {
+          systemNotification.requestPermission();
+        }
+        return {
+          ...l,
+          hasAlert: nextAlert,
+          alertFired: false,
+          alertDirection: currentPriceNum > 0 ? (l.price >= currentPriceNum ? 'above' as const : 'below' as const) : undefined,
+        };
+      }
+      return l;
+    });
+    setCustomLines(next);
+    persistCustomLines(next);
   };
 
   const handleDeleteLine = (id: string) => {
@@ -675,130 +690,6 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [contextMenu.visible]);
 
-  // -------------------------------------------------------------
-  // FLOATING MODE SWITCHER: LONG-PRESS DRAG LOGIC (تحريك بالضغط المطول)
-  // -------------------------------------------------------------
-  const cancelSwitcherLongPress = useCallback(() => {
-    if (switcherDragTimerRef.current) {
-      clearTimeout(switcherDragTimerRef.current);
-      switcherDragTimerRef.current = null;
-    }
-  }, []);
-
-  const handleSwitcherPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return; // Left button or primary touch only
-
-    cancelSwitcherLongPress();
-    switcherJustDraggedRef.current = false;
-
-    const overlay = chartOverlayRef.current;
-    const switcher = switcherRef.current;
-    if (!overlay || !switcher) return;
-
-    switcherStartPointerRef.current = {
-      clientX: e.clientX,
-      clientY: e.clientY,
-      initialX: switcherPos.x,
-      initialY: switcherPos.y,
-    };
-
-    const targetEl = e.currentTarget;
-
-    // Trigger drag mode after 320ms deliberate hold
-    switcherDragTimerRef.current = setTimeout(() => {
-      setIsDraggingSwitcher(true);
-      switcherJustDraggedRef.current = true;
-      try {
-        targetEl.setPointerCapture(e.pointerId);
-      } catch {
-        // Ignore
-      }
-      if (typeof window !== 'undefined' && 'navigator' in window && 'vibrate' in navigator) {
-        try {
-          navigator.vibrate(35);
-        } catch {
-          // Ignore
-        }
-      }
-    }, 320);
-  };
-
-  const handleSwitcherPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!switcherStartPointerRef.current) return;
-
-    if (!isDraggingSwitcher) {
-      const dist = Math.hypot(
-        e.clientX - switcherStartPointerRef.current.clientX,
-        e.clientY - switcherStartPointerRef.current.clientY
-      );
-      if (dist > 8) {
-        // Moving before timer fires: cancel long-press so user can scroll/tap normally
-        cancelSwitcherLongPress();
-      }
-      return;
-    }
-
-    // Active drag in progress
-    e.preventDefault();
-    switcherJustDraggedRef.current = true;
-
-    const overlay = chartOverlayRef.current;
-    const switcher = switcherRef.current;
-    if (!overlay || !switcher) return;
-
-    const overlayRect = overlay.getBoundingClientRect();
-    const switcherRect = switcher.getBoundingClientRect();
-
-    const deltaX = e.clientX - switcherStartPointerRef.current.clientX;
-    const deltaY = e.clientY - switcherStartPointerRef.current.clientY;
-
-    const maxX = Math.max(8, overlayRect.width - switcherRect.width - 8);
-    const maxY = Math.max(8, overlayRect.height - switcherRect.height - 8);
-
-    const newX = Math.max(8, Math.min(maxX, switcherStartPointerRef.current.initialX + deltaX));
-    const newY = Math.max(8, Math.min(maxY, switcherStartPointerRef.current.initialY + deltaY));
-
-    setSwitcherPos({ x: Math.round(newX), y: Math.round(newY) });
-  };
-
-  const handleSwitcherPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    cancelSwitcherLongPress();
-
-    if (isDraggingSwitcher) {
-      setIsDraggingSwitcher(false);
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {
-        // Ignore
-      }
-
-      // Persist chosen custom position
-      try {
-        localStorage.setItem('tv_chart_mode_switcher_pos', JSON.stringify(switcherPos));
-      } catch {
-        // Ignore
-      }
-
-      setTimeout(() => {
-        switcherJustDraggedRef.current = false;
-      }, 120);
-    } else {
-      switcherJustDraggedRef.current = false;
-    }
-
-    switcherStartPointerRef.current = null;
-  };
-
-  const handleResetSwitcherPos = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const defaultPos = { x: 12, y: 12 };
-    setSwitcherPos(defaultPos);
-    try {
-      localStorage.setItem('tv_chart_mode_switcher_pos', JSON.stringify(defaultPos));
-    } catch {
-      // Ignore
-    }
-  };
 
   // -------------------------------------------------------------
   // SAVE AS IMAGE (حفظ لقطة شاشة للشارت مع كافة الخطوط)
@@ -944,7 +835,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     const toolbarColor = isDark ? '0f172a' : 'ffffff';
     return `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_advanced_chart&symbol=BINANCE%3A${encodeURIComponent(
       binanceSymbol
-    )}&interval=15&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=${toolbarColor}&studies=%5B%5D&theme=${chartTheme}&style=1&timezone=Etc%2FUTC&locale=ar_AE`;
+    )}&interval=15&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=${toolbarColor}&theme=${chartTheme}&style=1&timezone=Etc%2FUTC&locale=ar_AE&allow_symbol_change=1&details=1&withdateranges=1`;
   }, [binanceSymbol, chartTheme, isDark]);
 
   if (!isOpen) return null;
@@ -968,234 +859,319 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
         {/* ========================================================================= */}
         {!isFullscreen && (
           <header 
-            className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b shrink-0 transition-colors ${
+            className={`flex flex-col border-b shrink-0 transition-colors ${
               isDark ? 'bg-slate-900/95 border-slate-800 text-white' : 'bg-white/95 border-slate-200 text-slate-900'
             }`}
           >
-            {/* Right: Back Button + Coin Identity */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs transition border cursor-pointer shadow-xs ${
-                  isDark 
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700' 
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-800 hover:text-slate-950 border-slate-300'
-                }`}
-                title="العودة لشاشة المراقبة"
-              >
-                <ArrowRight className="w-4 h-4 stroke-[2.5]" />
-                <span className="hidden sm:inline">رجوع</span>
-              </button>
-
+            {/* Row 1: Primary Controls, Price Stats & Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+              {/* Right: Close & Back Buttons + Coin Identity */}
               <div className="flex items-center gap-2">
-                <CoinAvatar symbol={baseAsset} size="md" />
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono font-black text-base tracking-tight">
-                      {binanceSymbol}
-                    </span>
-                    <span className="text-[10px] font-black font-mono px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                      BINANCE
-                    </span>
-                  </div>
-                  {livePrice && (
-                    <div className="flex items-center gap-1.5 text-xs font-mono font-black text-emerald-600 dark:text-emerald-400">
-                      <span>${trimTrailingZeros(livePrice)}</span>
+                {/* Prominent Close Button */}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs transition bg-rose-600 hover:bg-rose-500 text-white cursor-pointer shadow-md"
+                  title="إغلاق الشارت والعودة للشاشة السابقة"
+                >
+                  <X className="w-4 h-4 stroke-[3]" />
+                  <span>إغلاق</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-bold text-xs transition border cursor-pointer ${
+                    isDark 
+                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700' 
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                  }`}
+                  title="الرجوع"
+                >
+                  <ArrowRight className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">رجوع</span>
+                </button>
+
+                <div className="flex items-center gap-2 mr-1">
+                  <CoinAvatar symbol={baseAsset} size="md" />
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-black text-base tracking-tight">
+                        {binanceSymbol}
+                      </span>
+                      <span className="text-[10px] font-black font-mono px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                        BINANCE
+                      </span>
                     </div>
+                    {livePrice && (
+                      <div className="flex items-center gap-1.5 text-xs font-mono font-black text-emerald-600 dark:text-emerald-400">
+                        <span>${trimTrailingZeros(livePrice)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Middle: Entry, Break-Even & Net P&L Badges */}
+              <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-1">
+                {/* Entry Price Badge */}
+                <div 
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs border ${
+                    isDark ? 'bg-slate-800/90 border-slate-700 text-white' : 'bg-slate-100 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-cyan-500 shrink-0" />
+                  <span className="font-bold text-[11px] text-slate-500 dark:text-slate-400">الدخول:</span>
+                  <span className="font-mono font-black" dir="ltr">
+                    {entryPrice ? `$${trimTrailingZeros(entryPrice)}` : '—'}
+                  </span>
+                  {entryPrice && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyPrice(entryPrice, 'entry')}
+                      className="p-0.5 text-slate-400 hover:text-amber-500 transition cursor-pointer"
+                      title="نسخ سعر الدخول"
+                    >
+                      {copiedField === 'entry' ? (
+                        <Check className="w-3 h-3 text-emerald-500" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                    </button>
                   )}
                 </div>
-              </div>
-            </div>
 
-            {/* Middle: Entry, Break-Even & Break-Even Spread % */}
-            <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-1">
-              {/* Entry Price Badge */}
-              <div 
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs border ${
-                  isDark ? 'bg-slate-800/90 border-slate-700 text-white' : 'bg-slate-100 border-slate-300 text-slate-900'
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-cyan-500 shrink-0" />
-                <span className="font-bold text-[11px] text-slate-500 dark:text-slate-400">الدخول:</span>
-                <span className="font-mono font-black" dir="ltr">
-                  {entryPrice ? `$${trimTrailingZeros(entryPrice)}` : '—'}
-                </span>
-                {entryPrice && (
-                  <button
-                    type="button"
-                    onClick={() => handleCopyPrice(entryPrice, 'entry')}
-                    className="p-0.5 text-slate-400 hover:text-amber-500 transition cursor-pointer"
-                    title="نسخ سعر الدخول"
-                  >
-                    {copiedField === 'entry' ? (
-                      <Check className="w-3 h-3 text-emerald-500" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                  </button>
-                )}
-              </div>
-
-              {/* Break-Even Price Badge + Spread % */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs">
-                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
-                <span className="font-bold text-amber-600 dark:text-amber-300 text-[11px]">التعادل:</span>
-                <span className="font-mono font-black text-amber-600 dark:text-amber-400" dir="ltr">
-                  {breakEvenPrice ? `$${trimTrailingZeros(breakEvenPrice)}` : '—'}
-                </span>
-
-                {breakEvenSpreadPercent !== null && (
-                  <span 
-                    className="font-mono font-black text-[11px] px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40"
-                    title="النسبة المئوية للفارق السعري بين سعر الدخول وسعر التعادل لتغطية الرسوم"
-                  >
-                    +{breakEvenSpreadPercent.toFixed(2)}%
+                {/* Break-Even Price Badge + Spread % */}
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                  <span className="font-bold text-amber-600 dark:text-amber-300 text-[11px]">التعادل:</span>
+                  <span className="font-mono font-black text-amber-600 dark:text-amber-400" dir="ltr">
+                    {breakEvenPrice ? `$${trimTrailingZeros(breakEvenPrice)}` : '—'}
                   </span>
-                )}
 
-                {breakEvenPrice && (
-                  <button
-                    type="button"
-                    onClick={() => handleCopyPrice(breakEvenPrice, 'be')}
-                    className="p-0.5 text-amber-600/80 dark:text-amber-400/80 hover:text-amber-500 transition cursor-pointer"
-                    title="نسخ سعر التعادل"
-                  >
-                    {copiedField === 'be' ? (
-                      <Check className="w-3 h-3 text-emerald-500" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                  </button>
-                )}
-              </div>
+                  {breakEvenSpreadPercent !== null && (
+                    <span 
+                      className="font-mono font-black text-[11px] px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40"
+                      title="النسبة المئوية للفارق السعري بين سعر الدخول وسعر التعادل لتغطية الرسوم"
+                    >
+                      +{breakEvenSpreadPercent.toFixed(2)}%
+                    </span>
+                  )}
 
-              {/* Net P&L Badge */}
-              {pnlData && (
-                <div className={`flex items-center gap-1 px-2.5 py-1 rounded-xl font-mono text-xs font-black border ${
-                  pnlData.isProfit 
-                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400' 
-                    : 'bg-rose-500/15 border-rose-500/40 text-rose-600 dark:text-rose-400'
-                }`}>
-                  {pnlData.isProfit ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                  <span>{pnlData.isProfit ? '+' : ''}{pnlData.percent.toFixed(2)}%</span>
-                  <span className="text-[10px] opacity-90 hidden sm:inline">
-                    ({pnlData.isProfit ? '+' : ''}{pnlData.usdt.toFixed(2)}$)
-                  </span>
+                  {breakEvenPrice && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyPrice(breakEvenPrice, 'be')}
+                      className="p-0.5 text-amber-600/80 dark:text-amber-400/80 hover:text-amber-500 transition cursor-pointer"
+                      title="نسخ سعر التعادل"
+                    >
+                      {copiedField === 'be' ? (
+                        <Check className="w-3 h-3 text-emerald-500" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                    </button>
+                  )}
                 </div>
-              )}
-            </div>
 
-            {/* Left: Toggles & Actions */}
-            <div className="flex items-center gap-1.5">
-              {/* Draw Custom Line Button */}
-              <button
-                type="button"
-                onClick={() => handleOpenAddLine()}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs transition cursor-pointer shadow-xs"
-                title="رسم خط أفقي مخصص مع لون، نمط، نص وتنبيه"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span className="text-[11px]">رسم خط</span>
-              </button>
+                {/* Net P&L Badge */}
+                {pnlData && (
+                  <div className={`flex items-center gap-1 px-2.5 py-1 rounded-xl font-mono text-xs font-black border ${
+                    pnlData.isProfit 
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400' 
+                      : 'bg-rose-500/15 border-rose-500/40 text-rose-600 dark:text-rose-400'
+                  }`}>
+                    {pnlData.isProfit ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                    <span>{pnlData.isProfit ? '+' : ''}{pnlData.percent.toFixed(2)}%</span>
+                    <span className="text-[10px] opacity-90 hidden sm:inline">
+                      ({pnlData.isProfit ? '+' : ''}{pnlData.usdt.toFixed(2)}$)
+                    </span>
+                  </div>
+                )}
+              </div>
 
-              {/* Lines Manager & Delete Button (Visible if custom lines exist) */}
-              {customLines.length > 0 && (
+              {/* Left: Line Actions & Chart Tools */}
+              <div className="flex items-center gap-1.5">
+                {/* Draw Custom Line Button */}
                 <button
                   type="button"
-                  onClick={() => setShowLinesManager(true)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-600 dark:text-rose-300 font-bold text-xs transition cursor-pointer"
-                  title={`إدارة أو حذف خطوط الشارت (${customLines.length})`}
+                  onClick={() => handleOpenAddLine()}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs transition cursor-pointer shadow-xs"
+                  title="رسم وإضافة خط أو مذكرة سعرية جديدة لهذه العملة"
                 >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                  <span className="text-[11px]">الخطوط ({customLines.length})</span>
+                  <Plus className="w-3.5 h-3.5" />
+                  <span className="text-[11px]">رسم خط ومذكرة</span>
                 </button>
-              )}
 
-              {/* Exit Alert Target Button */}
-              <button
-                type="button"
-                onClick={() => setShowExitAlertModal(true)}
-                className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                  exitAlertActive 
-                    ? 'bg-pink-600/20 border-pink-500/50 text-pink-600 dark:text-pink-300' 
-                    : isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'
-                }`}
-                title="تحديد سعر تنبيه للخروج وتفعيله مع Push Notification"
-              >
-                <Target className="w-3.5 h-3.5 text-pink-500" />
-                <span className="hidden md:inline text-[11px]">تنبيه الخروج</span>
-              </button>
-
-              {/* Save As Image Button */}
-              <button
-                type="button"
-                onClick={handleSaveAsImage}
-                disabled={isCapturingScreenshot}
-                className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition cursor-pointer"
-                title="حفظ لقطة شاشة للشارت مع كافة الخطوط والأدوات المرسومة كصورة جهازك"
-              >
-                <Camera className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden lg:inline text-[11px]">حفظ كصورة</span>
-              </button>
-
-              {/* In-Chart Lines Toggle */}
-              {(entryPrice || breakEvenPrice) && (
+                {/* Lines & Memos Dock Toggle Button */}
                 <button
                   type="button"
-                  onClick={() => setShowInChartLevels((prev) => !prev)}
-                  className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                    showInChartLevels
-                      ? 'bg-blue-600/15 border-blue-500/40 text-blue-600 dark:text-blue-300'
-                      : isDark ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-100 border-slate-300 text-slate-600'
-                  }`}
-                  title={showInChartLevels ? 'إخفاء خطوط المستويات على الشارت' : 'إظهار خطوط المستويات على الشارت'}
-                >
-                  {showInChartLevels ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                </button>
-              )}
-
-              {/* Test Prices Drawer Toggle */}
-              {activeTestPrices.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowTestPricesDrawer((prev) => !prev)}
-                  className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                    showTestPricesDrawer 
-                      ? 'bg-amber-500/20 border-amber-500/50 text-amber-600 dark:text-amber-300'
+                  onClick={() => setShowLinesDock((prev) => !prev)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-bold text-xs transition border cursor-pointer ${
+                    showLinesDock
+                      ? 'bg-cyan-500 text-slate-950 border-cyan-400 font-black shadow-sm'
+                      : customLines.length > 0
+                      ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/25'
                       : isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'
                   }`}
-                  title="عرض قائمة أسعار الاختبار مع الطوابع الزمنية"
+                  title="عرض مكتبة الخطوط والمذكرات المحفوظة لهذه العملة"
                 >
-                  <Clock className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="text-[11px]">({activeTestPrices.length})</span>
+                  <Bookmark className="w-3.5 h-3.5" />
+                  <span className="text-[11px]">المذكرات ({customLines.length})</span>
+                </button>
+
+                {/* Exit Alert Target Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowExitAlertModal(true)}
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                    exitAlertActive 
+                      ? 'bg-pink-600/20 border-pink-500/50 text-pink-600 dark:text-pink-300' 
+                      : isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'
+                  }`}
+                  title="تحديد سعر تنبيه للخروج وتفعيله مع Push Notification"
+                >
+                  <Target className="w-3.5 h-3.5 text-pink-500" />
+                  <span className="hidden md:inline text-[11px]">هدف الخروج</span>
+                </button>
+
+                {/* Save As Image Button */}
+                <button
+                  type="button"
+                  onClick={handleSaveAsImage}
+                  disabled={isCapturingScreenshot}
+                  className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition cursor-pointer"
+                  title="حفظ لقطة شاشة للشارت مع كافة الخطوط كصورة على جهازك"
+                >
+                  <Camera className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden lg:inline text-[11px]">حفظ صورة</span>
+                </button>
+
+                {/* In-Chart Lines Toggle */}
+                {(entryPrice || breakEvenPrice || customLines.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => setShowInChartLevels((prev) => !prev)}
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                      showInChartLevels
+                        ? 'bg-blue-600/15 border-blue-500/40 text-blue-600 dark:text-blue-300'
+                        : isDark ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-100 border-slate-300 text-slate-600'
+                    }`}
+                    title={showInChartLevels ? 'إخفاء خطوط المستويات' : 'إظهار خطوط المستويات'}
+                  >
+                    {showInChartLevels ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+
+                {/* Test Prices Drawer Toggle */}
+                {activeTestPrices.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowTestPricesDrawer((prev) => !prev)}
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                      showTestPricesDrawer 
+                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-600 dark:text-amber-300'
+                        : isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'
+                    }`}
+                    title="عرض قائمة أسعار الاختبار مع الطوابع الزمنية"
+                  >
+                    <Clock className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-[11px]">({activeTestPrices.length})</span>
+                  </button>
+                )}
+
+                {/* Theme Toggle Button */}
+                <button
+                  type="button"
+                  onClick={toggleChartTheme}
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                    isDark 
+                      ? 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-slate-700' 
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                  }`}
+                  title={isDark ? 'تبديل لخلفية بيضاء' : 'تبديل لخلفية سوداء'}
+                >
+                  {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                </button>
+
+                {/* Fullscreen Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsFullscreen(true)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition cursor-pointer shadow-sm"
+                  title="تفعيل وضع ملء الشاشة الكامل"
+                >
+                  <Maximize2 className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <span className="hidden sm:inline">ملء الشاشة</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Row 2: Direct Screen Integrations Navigation Strip */}
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 border-t text-xs overflow-x-auto ${
+              isDark ? 'bg-slate-950/70 border-slate-800/80' : 'bg-slate-100/80 border-slate-200'
+            }`}>
+              <span className="text-[11px] font-bold text-slate-400 shrink-0 ml-1">التنقل السريع لنفس العملة ({baseAsset}):</span>
+
+              {onNavigateToCalculator && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateToCalculator(baseAsset, entryPrice || livePrice)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 dark:text-amber-300 border border-amber-500/40 font-bold transition cursor-pointer shrink-0"
+                  title="فتح هذه العملة في حاسبة التعادل"
+                >
+                  <Calculator className="w-3.5 h-3.5 text-amber-500" />
+                  <span>حاسبة التعادل</span>
                 </button>
               )}
 
-              {/* Theme Toggle Button */}
-              <button
-                type="button"
-                onClick={toggleChartTheme}
-                className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                  isDark 
-                    ? 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-slate-700' 
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-                }`}
-                title={isDark ? 'تبديل لخلفية بيضاء (Light Theme)' : 'تبديل لخلفية سوداء (Dark Theme)'}
-              >
-                {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-              </button>
+              {onNavigateToRangeMaster && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateToRangeMaster(baseAsset)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-600 dark:text-cyan-300 border border-cyan-500/40 font-bold transition cursor-pointer shrink-0"
+                  title="فتح هذه العملة في صائد القيعان"
+                >
+                  <Layers className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>صائد القيعان</span>
+                </button>
+              )}
 
-              {/* Fullscreen Button */}
-              <button
-                type="button"
-                onClick={() => setIsFullscreen(true)}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition cursor-pointer shadow-sm"
-                title="تفعيل وضع ملء الشاشة الكامل"
-              >
-                <Maximize2 className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span className="hidden sm:inline">ملء الشاشة</span>
-              </button>
+              {onNavigateToScalper && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateToScalper(baseAsset)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-300 border border-emerald-500/40 font-bold transition cursor-pointer shrink-0"
+                  title="فتح هذه العملة في لوحة السكالبينج"
+                >
+                  <Zap className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>السكالبينج</span>
+                </button>
+              )}
+
+              {onNavigateToTracker && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateToTracker(baseAsset)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-300 border border-purple-500/40 font-bold transition cursor-pointer shrink-0"
+                  title="فتح هذه العملة في رصد الصعود"
+                >
+                  <TrendingUp className="w-3.5 h-3.5 text-purple-500" />
+                  <span>رصد الصعود</span>
+                </button>
+              )}
+
+              {onNavigateToWatchlist && (
+                <button
+                  type="button"
+                  onClick={onNavigateToWatchlist}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-600 dark:text-blue-300 border border-blue-500/40 font-bold transition cursor-pointer shrink-0"
+                  title="العودة لقائمة المراقبة"
+                >
+                  <LayoutList className="w-3.5 h-3.5 text-blue-500" />
+                  <span>قائمة المراقبة</span>
+                </button>
+              )}
             </div>
           </header>
         )}
@@ -1280,111 +1256,47 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
           onContextMenu={handleContextMenu}
           className={`relative flex-1 w-full h-full min-h-[350px] ${isDark ? 'bg-slate-950' : 'bg-white'}`}
         >
-          {/* Top Left Floating Switch: Long-Press Draw Mode vs Native TradingView Candle Mode */}
-          {/* Draggable via Long-Press (تحريك بالسحب عند الضغط المطول) - Default at top-left opposite coin name */}
+          {/* Quick Floating Toolbar for Custom Lines & Memos */}
           <div 
-            ref={switcherRef}
             style={{
               position: 'absolute',
-              top: `${switcherPos.y}px`,
-              left: `${switcherPos.x}px`,
-              touchAction: 'none',
+              top: '12px',
+              left: '12px',
             }}
-            onPointerDown={handleSwitcherPointerDown}
-            onPointerMove={handleSwitcherPointerMove}
-            onPointerUp={handleSwitcherPointerUp}
-            onPointerCancel={handleSwitcherPointerUp}
-            className={`z-35 flex items-center gap-1.5 p-1 rounded-xl backdrop-blur-md border transition-shadow select-none ${
-              isDraggingSwitcher 
-                ? 'cursor-grabbing shadow-2xl ring-2 ring-cyan-400 bg-slate-900 border-cyan-400 scale-105 duration-75' 
-                : 'cursor-grab shadow-lg bg-slate-900/90 border-slate-700/80 hover:border-slate-600 duration-200'
-            } text-[11px] font-bold`}
-            title="اضغط مطولاً لسحب الزر إلى أي مكان بالشاشة"
+            className="z-35 flex items-center gap-1.5 p-1 rounded-xl backdrop-blur-md border shadow-lg bg-slate-900/90 border-slate-700/80 text-[11px] font-bold select-none"
           >
-            {/* Drag Handle / Grip Indicator */}
-            <div 
-              className="flex items-center justify-center pl-1 text-slate-400 hover:text-cyan-400 transition"
-              title="مقبض التحريك: اضغط مطولاً للسحب إلى أي مكان"
-            >
-              <GripVertical className="w-3.5 h-3.5" />
-            </div>
-
             <button
               type="button"
-              onClick={() => {
-                if (switcherJustDraggedRef.current) return;
-                setChartInteractionMode('draw_gesture');
-              }}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition cursor-pointer ${
-                chartInteractionMode === 'draw_gesture'
-                  ? 'bg-cyan-500 text-slate-950 shadow-xs font-black'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-              title="تفعيل وضع الضغط المطول (Long Press) لرسم الخطوط وإدارتها باللمس"
+              onClick={() => handleOpenAddLine()}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white shadow-xs font-black transition cursor-pointer"
+              title="رسم وإضافة خط أو مذكرة سعرية لهذه العملة"
             >
-              <Sliders className="w-3.5 h-3.5" />
-              <span>رسم بالضغط المطول ✍️</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>رسم خط ومذكرة ✍️</span>
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (switcherJustDraggedRef.current) return;
-                setChartInteractionMode('browse_chart');
-              }}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition cursor-pointer ${
-                chartInteractionMode === 'browse_chart'
-                  ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
-                  : 'text-slate-300 hover:text-white'
+              onClick={() => setShowLinesDock((prev) => !prev)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg transition cursor-pointer ${
+                showLinesDock 
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-xs' 
+                  : 'text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800'
               }`}
-              title="تصفح شموع ومؤشرات TradingView بحرية تامة دون اعتراض اللمس"
+              title="عرض مكتبة خطوط ومذكرات هذه العملة"
             >
-              <Eye className="w-3.5 h-3.5" />
-              <span>تصفح الشموع 📊</span>
+              <Bookmark className="w-3.5 h-3.5 text-amber-400" />
+              <span>المذكرات ({customLines.length})</span>
             </button>
-
-            {/* Reset to Default Top-Left Position if moved */}
-            {(switcherPos.x !== 12 || switcherPos.y !== 12) && !isDraggingSwitcher && (
-              <button
-                type="button"
-                onClick={handleResetSwitcherPos}
-                className="p-1 rounded-md text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
-                title="إعادة الزر لمكانه الافتراضي في أعلى اليسار (المقابل لاسم العملة)"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            )}
-
-            {/* Active Dragging Hint */}
-            {isDraggingSwitcher && (
-              <span className="absolute -top-7 right-0 text-[10px] font-black text-cyan-300 bg-slate-950/90 border border-cyan-500/40 px-2 py-0.5 rounded-md shadow-md animate-pulse whitespace-nowrap">
-                جارِ التحريك... أفلِت في أي مكان
-              </span>
-            )}
           </div>
 
           <iframe
             key={`${binanceSymbol}-${chartTheme}`}
             src={iframeSrc}
-            className="w-full h-full border-0 block"
+            className="w-full h-full border-0 block pointer-events-auto"
             title={`TradingView Chart for ${binanceSymbol}`}
             allow="fullscreen; clipboard-write"
             loading="lazy"
           />
-
-          {/* DELIBERATE LONG-PRESS GESTURE LAYER (يعمل بالضغط المطول 750ms فقط ويُلغى فوراً عند التحريك) */}
-          {chartInteractionMode === 'draw_gesture' && (
-            <div 
-              className="absolute inset-0 z-20 cursor-crosshair select-none touch-none"
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
-              onTouchCancel={handleTouchEnd}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
-            />
-          )}
 
           {/* ======================================================================= */}
           {/* DYNAMIC IN-CHART LEVEL LINES (تحرك مباشر وتلقائي مع السعر والبيانات)   */}
@@ -1882,9 +1794,20 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
 
             {/* Price Input */}
             <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1">
-                سعر المستوى (USDT):
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-slate-300">
+                  سعر المستوى (USDT):
+                </label>
+                {livePrice && (
+                  <button
+                    type="button"
+                    onClick={() => setLineEditorPrice(trimTrailingZeros(livePrice))}
+                    className="text-[11px] font-mono font-bold text-emerald-400 hover:text-emerald-300 hover:underline cursor-pointer"
+                  >
+                    السعر اللحظي: ${trimTrailingZeros(livePrice)}
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
                 dir="ltr"
@@ -1960,13 +1883,13 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
             {/* Annotation Label Text, Color & Size */}
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-300 block">
-                نص توضيحي فوق الخط (اختياري):
+                عنوان أو وصف الخط (اختياري):
               </label>
               <input
                 type="text"
                 value={lineEditorLabel}
                 onChange={(e) => setLineEditorLabel(e.target.value)}
-                placeholder="مثال: مقاومة يومية / منطقة تجميع / هدف أول"
+                placeholder="مثال: قاع صاعد / مقاومة يومية / هدف أول"
                 className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:border-cyan-500"
               />
 
@@ -2023,18 +1946,37 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               </div>
             </div>
 
-            {/* Alert Option */}
-            <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Bell className="w-4 h-4 text-amber-400" />
-                <span className="text-xs font-bold">تنبيه عند وصول السعر لهذا الخط</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={lineEditorAlert}
-                onChange={(e) => setLineEditorAlert(e.target.checked)}
-                className="w-4 h-4 accent-amber-500 cursor-pointer"
+            {/* Notes / Memos Textarea */}
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1">
+                ملاحظات ومذكرة تفصيلية (الترند، الهبوط والصعود، سبب وضع المستوى):
+              </label>
+              <textarea
+                value={lineEditorNotes}
+                onChange={(e) => setLineEditorNotes(e.target.value)}
+                rows={2}
+                placeholder="اكتب هنا مذكرتك التحليلية لمراجعتها لاحقاً (مثال: ارتداد من خط دعم ترند صاعد بعد هبوط 3 أيام)..."
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-500 resize-none"
               />
+            </div>
+
+            {/* Alert Option */}
+            <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700 space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bell className={`w-4 h-4 ${lineEditorAlert ? 'text-amber-400' : 'text-slate-400'}`} />
+                  <span className="text-xs font-bold">تفعيل تنبيه صوتي وإشعار عند وصول السعر</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={lineEditorAlert}
+                  onChange={(e) => setLineEditorAlert(e.target.checked)}
+                  className="w-4 h-4 accent-amber-500 cursor-pointer"
+                />
+              </div>
+              <p className="text-[10px] text-slate-400">
+                {lineEditorAlert ? '🔔 سيتم إطلاق صوت وإشعار فوري عند ملامسة السعر للخط.' : '🔕 خط تحليلي ومذكرة فقط بدون تنبيه إزعاج (يمكنك تفعيله متى شئت).'}
+              </p>
             </div>
 
             {/* Actions */}
@@ -2195,90 +2137,186 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 5. MODAL: LINES MANAGER & BATCH CLEAR (إدارة وحذف جميع الخطوط)            */}
+      {/* 5. MODAL: LINES & MEMOS LIBRARY (مكتبة خطوط ومذكرات العملة الشاملة)        */}
       {/* ========================================================================= */}
-      {showLinesManager && (
+      {(showLinesManager || showLinesDock) && (
         <div 
           className="fixed inset-0 z-[80] flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md cursor-pointer"
           dir="rtl"
-          onClick={() => setShowLinesManager(false)}
+          onClick={() => {
+            setShowLinesManager(false);
+            setShowLinesDock(false);
+          }}
         >
           <div 
-            className="w-full max-w-md p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default max-h-[85vh] flex flex-col"
+            className="w-full max-w-lg p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default max-h-[85vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800 shrink-0">
-              <span className="font-black text-sm text-amber-400 flex items-center gap-2">
-                <Sliders className="w-4 h-4" />
-                <span>إدارة خطوط الشارت المرسومة ({customLines.length})</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowLinesManager(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-                title="إغلاق النافذة"
-              >
-                <X className="w-4 h-4" />
-              </button>
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <Bookmark className="w-5 h-5 text-cyan-400" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-black text-sm text-cyan-400">
+                      مكتبة خطوط ومذكرات {binanceSymbol}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                      {customLines.length} مستويات
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400">
+                    محفوظة بشكل دائم لهذه العملة دون مسح عند التنقل
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLinesManager(false);
+                    setShowLinesDock(false);
+                    handleOpenAddLine();
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition cursor-pointer shadow-sm"
+                  title="إضافة خط ومذكرة جديدة"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>إضافة مستوى</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLinesManager(false);
+                    setShowLinesDock(false);
+                  }}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                  title="إغلاق النافذة"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
+            {/* List */}
             {customLines.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 text-xs">
-                لا توجد خطوط مرسومة حالياً على هذا الشارت.
+              <div className="py-12 text-center text-slate-400 space-y-2">
+                <FileText className="w-10 h-10 mx-auto text-slate-600 stroke-[1.5]" />
+                <p className="text-xs font-bold">لا توجد خطوط أو مذكرات مرسومة حالياً لهذه العملة.</p>
+                <p className="text-[11px] text-slate-500">
+                  انقر على زر &quot;إضافة مستوى&quot; لرسم خط أفقي مع كتابة مذكراتك وتحليلك للترند وتحديد تنبيه اختياري.
+                </p>
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto space-y-2 py-1">
-                {customLines.map((line, idx) => (
-                  <div 
-                    key={line.id}
-                    className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-800/80 border border-slate-700/80"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div 
-                        className="w-3.5 h-3.5 rounded-full border border-black/30 shrink-0" 
-                        style={{ backgroundColor: line.color }} 
-                      />
-                      <div>
+              <div className="flex-1 overflow-y-auto space-y-2.5 py-1">
+                {customLines.map((line, idx) => {
+                  const diffFromLive = currentPriceNum > 0 ? ((line.price - currentPriceNum) / currentPriceNum) * 100 : null;
+                  const isAbove = diffFromLive !== null && diffFromLive >= 0;
+                  return (
+                    <div 
+                      key={line.id}
+                      className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80 hover:border-slate-600 transition space-y-2"
+                    >
+                      {/* Top Bar: Color, Price, Label, and Action Buttons */}
+                      <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-black text-xs text-white" dir="ltr">
-                            ${trimTrailingZeros(line.price.toString())}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-bold">
-                            #{idx + 1}
-                          </span>
-                        </div>
-                        {line.label && (
-                          <div className="text-[11px] text-slate-300 font-bold">
-                            {line.label}
+                          <div 
+                            className="w-4 h-4 rounded-full border border-black/30 shrink-0 shadow-sm" 
+                            style={{ backgroundColor: line.color }} 
+                          />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-black text-sm text-white" dir="ltr">
+                                ${trimTrailingZeros(line.price.toString())}
+                              </span>
+                              {diffFromLive !== null && (
+                                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-md ${
+                                  isAbove 
+                                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' 
+                                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                }`}>
+                                  {isAbove ? '+' : ''}{diffFromLive.toFixed(2)}%
+                                </span>
+                              )}
+                              <span className="text-[10px] text-slate-500 font-bold">#{idx + 1}</span>
+                            </div>
+                            {line.label && (
+                              <div className="text-xs font-bold text-slate-200 mt-0.5">
+                                {line.label}
+                              </div>
+                            )}
                           </div>
+                        </div>
+
+                        {/* Quick Actions */}
+                        <div className="flex items-center gap-1.5">
+                          {/* Alert Toggle Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleLineAlert(line.id)}
+                            className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-bold transition border cursor-pointer ${
+                              line.hasAlert
+                                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
+                                : 'bg-slate-700/50 border-slate-600 text-slate-400 hover:text-white'
+                            }`}
+                            title={line.hasAlert ? 'انقر لإلغاء التنبيه الصوتي لهذا الخط' : 'انقر لتفعيل تنبيه صوتي عند وصول السعر'}
+                          >
+                            {line.hasAlert ? <BellRing className="w-3.5 h-3.5 text-amber-400" /> : <Bell className="w-3.5 h-3.5" />}
+                            <span>{line.hasAlert ? 'تنبيه مفعّل' : 'بدون تنبيه'}</span>
+                          </button>
+
+                          {/* Edit Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowLinesManager(false);
+                              setShowLinesDock(false);
+                              handleEditLine(line);
+                            }}
+                            className="p-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 transition cursor-pointer"
+                            title="تعديل هذا الخط"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Delete Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteLine(line.id)}
+                            className="p-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 transition cursor-pointer"
+                            title="حذف هذا الخط"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Notes / Memo Body (if written) */}
+                      {line.notes && (
+                        <div className="p-2 rounded-xl bg-slate-900/60 border border-slate-700/50 text-xs text-slate-300 leading-relaxed font-sans">
+                          <span className="text-[10px] font-bold text-slate-500 block mb-0.5">مذكرة التحليل:</span>
+                          {line.notes}
+                        </div>
+                      )}
+
+                      {/* Line Meta (Time & Price when created) */}
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1 border-t border-slate-700/40">
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-amber-500 shrink-0" />
+                          <span>سجلت: {formatTimestamp(line.createdAt)}</span>
+                        </div>
+                        {line.createdPriceAtTime && (
+                          <span>السعر حينها: ${trimTrailingZeros(line.createdPriceAtTime.toString())}</span>
                         )}
+                        <span className="text-slate-500 capitalize">
+                          {line.style === 'solid' ? 'متصل' : line.style === 'dashed' ? 'متقطع' : 'منقط'} ({line.thickness}px)
+                        </span>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowLinesManager(false);
-                          handleEditLine(line);
-                        }}
-                        className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs transition cursor-pointer"
-                        title="تعديل هذا الخط"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteLine(line.id)}
-                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 text-xs font-bold transition cursor-pointer"
-                        title="حذف هذا الخط فوراً"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>حذف</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
