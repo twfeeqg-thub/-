@@ -137,6 +137,14 @@ class SystemNotificationManager {
           await registration.showNotification(options.title, notificationPayload);
           return true;
         }
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'SHOW_NOTIFICATION',
+            title: options.title,
+            options: notificationPayload,
+          });
+          return true;
+        }
       } catch (swErr) {
         console.warn('[Notification API] ServiceWorker showNotification fallback:', swErr);
       }

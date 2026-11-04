@@ -60,6 +60,7 @@ import {
 } from '@/types/watchlist';
 import { systemNotification } from '@/lib/systemNotification';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
+import { soundAlert } from '@/lib/soundAlert';
 import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList, Layers, User } from 'lucide-react';
 
 export default function CalculatorPage() {
@@ -878,7 +879,204 @@ export default function CalculatorPage() {
     return combined.sort().join('/');
   }, [isTrackerStreamActive, trackedCurrencies, scalpTrades, watchlistItems, rangeStreamSymbols]);
 
-  // Real-time WebSocket connection to Binance for both Tracker and Scalper
+  // Unified Price Update Processor (for both WebSocket and Background Web Worker)
+  const processPriceUpdate = useCallback((symbol: string, price: string) => {
+    if (!symbol || !price) return;
+    setTrackerLivePrices((prev) => ({ ...prev, [symbol]: price }));
+
+    const priceNum = parseFloat(price);
+    if (isNaN(priceNum) || priceNum <= 0) return;
+
+    // 1. Update Tracker Currencies Peak & Trough
+    setTrackedCurrencies((prev) => {
+      let hasChanges = false;
+      const next = prev.map((tc) => {
+        if (tc.binanceSymbol === symbol) {
+          const currentPeak = tc.peakPrice ? parseFloat(tc.peakPrice) : parseFloat(tc.baselinePrice);
+          const currentTrough = tc.troughPrice ? parseFloat(tc.troughPrice) : parseFloat(tc.baselinePrice);
+          let newPeak = tc.peakPrice;
+          let newPeakTs = tc.peakTimestamp;
+          let newTrough = tc.troughPrice;
+          let newTroughTs = tc.troughTimestamp;
+
+          if (priceNum > currentPeak) {
+            newPeak = price;
+            newPeakTs = Date.now();
+            hasChanges = true;
+          }
+          if (priceNum < currentTrough) {
+            newTrough = price;
+            newTroughTs = Date.now();
+            hasChanges = true;
+          }
+
+          if (hasChanges) {
+            return {
+              ...tc,
+              peakPrice: newPeak,
+              peakTimestamp: newPeakTs,
+              troughPrice: newTrough,
+              troughTimestamp: newTroughTs,
+            };
+          }
+        }
+        return tc;
+      });
+
+      if (hasChanges) {
+        persistTrackedCurrenciesRef.current(next);
+        return next;
+      }
+      return prev;
+    });
+
+    // 2. Update Scalper Trades: Dip Tracking for Watching, Peak Tracking for In-Trade, and real-time Price History
+    setScalpTrades((prev) => {
+      let hasChanges = false;
+      const next = prev.map((st) => {
+        if (st.binanceSymbol === symbol) {
+          const prevHistory = st.priceHistory || [];
+          const lastRecorded = prevHistory.length > 0 ? prevHistory[prevHistory.length - 1] : null;
+          let newHistory = prevHistory;
+          if (lastRecorded !== priceNum) {
+            newHistory = [...prevHistory, priceNum].slice(-25);
+            hasChanges = true;
+          }
+
+          if (st.status === 'watching') {
+            const currentDip = st.dipPrice ? parseFloat(st.dipPrice) : priceNum;
+            if (!st.dipPrice || priceNum < currentDip) {
+              hasChanges = true;
+              return {
+                ...st,
+                priceHistory: newHistory,
+                dipPrice: price,
+                dipTimestamp: Date.now(),
+              };
+            }
+
+            // Check for confirmed bounce above dip
+            if (currentDip > 0 && st.isActive !== false && st.alertsEnabled === true) {
+              const bouncePercent = ((priceNum - currentDip) / currentDip) * 100;
+              if (bouncePercent >= (st.bounceTriggerPercent || 0.4)) {
+                if (canTriggerAlert('reboundBounce', st.id)) {
+                  recordAlertTriggered('reboundBounce', st.id);
+                  soundAlert.playTone('celebration');
+                  systemNotification.sendNotification({
+                    title: `⚡ ارتداد جاهز للشراء (${st.name})!`,
+                    body: `ارتد سعر ${st.name} بنسبة +${bouncePercent.toFixed(2)}% فوق القاع (${currentDip} USDT). جاهز لسكالبينج سريع!`,
+                    tag: `bounce-${st.id}`,
+                    icon: '/pwa-192x192.png',
+                    badge: '/icon.svg',
+                    renotify: true,
+                  });
+                }
+              }
+            }
+
+            if (hasChanges) {
+              return { ...st, priceHistory: newHistory };
+            }
+          } else if (st.status === 'in_trade') {
+            const entryNum = st.entryPrice ? parseFloat(st.entryPrice) : priceNum;
+            const currentPeak = st.peakSinceEntry ? parseFloat(st.peakSinceEntry) : entryNum;
+            if (priceNum > currentPeak) {
+              hasChanges = true;
+              return {
+                ...st,
+                priceHistory: newHistory,
+                peakSinceEntry: price,
+                peakTimestamp: Date.now(),
+              };
+            }
+
+            // Trailing drop warning check
+            if (entryNum > 0 && currentPeak > entryNum && st.isActive !== false && st.alertsEnabled === true) {
+              const peakPnl = ((currentPeak - entryNum) / entryNum) * 100;
+              const dropFromPeak = ((currentPeak - priceNum) / currentPeak) * 100;
+              if (peakPnl >= 0.5 && dropFromPeak >= (st.trailingDropAlertPercent || 0.35)) {
+                if (canTriggerAlert('targetExit', st.id)) {
+                  recordAlertTriggered('targetExit', st.id);
+                  soundAlert.playTone('radar');
+                  systemNotification.sendNotification({
+                    title: `⚠️ تحذير هبوط من القمة (${st.name})!`,
+                    body: `هبط سعر ${st.name} بنسبة -${dropFromPeak.toFixed(2)}% عن أعلى قمة (${currentPeak} USDT). يُنصح بالخروج السريع لـ USDT!`,
+                    tag: `trailing-${st.id}`,
+                    icon: '/pwa-192x192.png',
+                    badge: '/icon.svg',
+                    renotify: true,
+                    requireInteraction: true,
+                  });
+                }
+              }
+            }
+
+            if (hasChanges) {
+              return { ...st, priceHistory: newHistory };
+            }
+          } else if (hasChanges) {
+            return { ...st, priceHistory: newHistory };
+          }
+        }
+        return st;
+      });
+
+      if (hasChanges) {
+        persistScalpTradesRef.current(next);
+        return next;
+      }
+      return prev;
+    });
+
+    // 3. Update Watchlist and Trigger Instant Price Alerts (مع الحفاظ الدائم على التنبيه نشطاً ومحفوظاً)
+    setWatchlistItems((prev) => {
+      let hasAlertFired = false;
+      const next = prev.map((item) => {
+        if (item.symbol === symbol && item.hasAlert && item.alertPrice) {
+          const targetNum = parseFloat(item.alertPrice);
+          if (!isNaN(targetNum) && targetNum > 0) {
+            const isTriggered = 
+              (item.alertDirection === 'above' && priceNum >= targetNum) ||
+              (item.alertDirection === 'below' && priceNum <= targetNum) ||
+              (!item.alertDirection && Math.abs(priceNum - targetNum) / targetNum < 0.002);
+
+            if (isTriggered) {
+              const alertKey = `wl_${item.id}`;
+              if (canTriggerAlert('targetExit', alertKey)) {
+                recordAlertTriggered('targetExit', alertKey);
+                hasAlertFired = true;
+                soundAlert.playTone('bell');
+                systemNotification.sendNotification({
+                  title: `🎯 تنبيه سعري فوري (${item.name})!`,
+                  body: `وصل سعر ${item.name} إلى ${priceNum} USDT (المستهدف: ${targetNum} USDT).`,
+                  tag: `wl-alert-${item.id}`,
+                  icon: '/pwa-192x192.png',
+                  badge: '/icon.svg',
+                  renotify: true,
+                  requireInteraction: true,
+                });
+              }
+
+              // التنبيه يستمر محفوظاً وفعالاً ولا يتم مسحه أبداً حتى يقوم المستخدم بحذفه أو تعديله بنفسه
+              return {
+                ...item,
+                hasAlert: true,
+              };
+            }
+          }
+        }
+        return item;
+      });
+
+      if (hasAlertFired) {
+        persistWatchlistItemsRef.current(next);
+        return next;
+      }
+      return prev;
+    });
+  }, []);
+
+  // Real-time WebSocket connection to Binance for Tracker and Scalper
   useEffect(() => {
     if (!isTrackerStreamActive || !trackedSymbolsKey) {
       if (trackerWsRef.current) {
@@ -905,190 +1103,7 @@ export default function CalculatorPage() {
           const price = ticker.c;
 
           if (symbol && price) {
-            setTrackerLivePrices((prev) => ({ ...prev, [symbol]: price }));
-
-            const priceNum = parseFloat(price);
-            if (!isNaN(priceNum) && priceNum > 0) {
-              // 1. Update Tracker Currencies Peak & Trough
-              setTrackedCurrencies((prev) => {
-                let hasChanges = false;
-                const next = prev.map((tc) => {
-                  if (tc.binanceSymbol === symbol) {
-                    const currentPeak = tc.peakPrice ? parseFloat(tc.peakPrice) : parseFloat(tc.baselinePrice);
-                    const currentTrough = tc.troughPrice ? parseFloat(tc.troughPrice) : parseFloat(tc.baselinePrice);
-                    let newPeak = tc.peakPrice;
-                    let newPeakTs = tc.peakTimestamp;
-                    let newTrough = tc.troughPrice;
-                    let newTroughTs = tc.troughTimestamp;
-
-                    if (priceNum > currentPeak) {
-                      newPeak = price;
-                      newPeakTs = Date.now();
-                      hasChanges = true;
-                    }
-                    if (priceNum < currentTrough) {
-                      newTrough = price;
-                      newTroughTs = Date.now();
-                      hasChanges = true;
-                    }
-
-                    if (hasChanges) {
-                      return {
-                        ...tc,
-                        peakPrice: newPeak,
-                        peakTimestamp: newPeakTs,
-                        troughPrice: newTrough,
-                        troughTimestamp: newTroughTs,
-                      };
-                    }
-                  }
-                  return tc;
-                });
-
-                if (hasChanges) {
-                  persistTrackedCurrenciesRef.current(next);
-                  return next;
-                }
-                return prev;
-              });
-
-              // 2. Update Scalper Trades: Dip Tracking for Watching, Peak Tracking for In-Trade, and real-time Price History
-              setScalpTrades((prev) => {
-                let hasChanges = false;
-                const next = prev.map((st) => {
-                  if (st.binanceSymbol === symbol) {
-                    const prevHistory = st.priceHistory || [];
-                    const lastRecorded = prevHistory.length > 0 ? prevHistory[prevHistory.length - 1] : null;
-                    let newHistory = prevHistory;
-                    if (lastRecorded !== priceNum) {
-                      newHistory = [...prevHistory, priceNum].slice(-25);
-                      hasChanges = true;
-                    }
-
-                    if (st.status === 'watching') {
-                      const currentDip = st.dipPrice ? parseFloat(st.dipPrice) : priceNum;
-                      if (!st.dipPrice || priceNum < currentDip) {
-                        hasChanges = true;
-                        return {
-                          ...st,
-                          priceHistory: newHistory,
-                          dipPrice: price,
-                          dipTimestamp: Date.now(),
-                        };
-                      }
-
-                      // Check for confirmed bounce above dip (فقط إذا كانت الصفقة مفعّلة والتنبيهات مشغلة لها)
-                      if (currentDip > 0 && st.isActive !== false && st.alertsEnabled === true) {
-                        const bouncePercent = ((priceNum - currentDip) / currentDip) * 100;
-                        if (bouncePercent >= (st.bounceTriggerPercent || 0.4)) {
-                          if (canTriggerAlert('reboundBounce', st.id)) {
-                            recordAlertTriggered('reboundBounce', st.id);
-                            systemNotification.sendNotification({
-                              title: `⚡ ارتداد جاهز للشراء (${st.name})!`,
-                              body: `ارتد سعر ${st.name} بنسبة +${bouncePercent.toFixed(2)}% فوق القاع (${currentDip} USDT). جاهز لسكالبينج سريع!`,
-                              tag: `bounce-${st.id}`,
-                              icon: '/pwa-192x192.png',
-                              badge: '/icon.svg',
-                              renotify: true,
-                            });
-                          }
-                        }
-                      }
-
-                      if (hasChanges) {
-                        return { ...st, priceHistory: newHistory };
-                      }
-                    } else if (st.status === 'in_trade') {
-                      const entryNum = st.entryPrice ? parseFloat(st.entryPrice) : priceNum;
-                      const currentPeak = st.peakSinceEntry ? parseFloat(st.peakSinceEntry) : entryNum;
-                      if (priceNum > currentPeak) {
-                        hasChanges = true;
-                        return {
-                          ...st,
-                          priceHistory: newHistory,
-                          peakSinceEntry: price,
-                          peakTimestamp: Date.now(),
-                        };
-                      }
-
-                      // Trailing drop warning check (فقط إذا كانت الصفقة مفعّلة والتنبيهات مشغلة لها)
-                      if (entryNum > 0 && currentPeak > entryNum && st.isActive !== false && st.alertsEnabled === true) {
-                        const peakPnl = ((currentPeak - entryNum) / entryNum) * 100;
-                        const dropFromPeak = ((currentPeak - priceNum) / currentPeak) * 100;
-                        if (peakPnl >= 0.5 && dropFromPeak >= (st.trailingDropAlertPercent || 0.35)) {
-                          if (canTriggerAlert('targetExit', st.id)) {
-                            recordAlertTriggered('targetExit', st.id);
-                            systemNotification.sendNotification({
-                              title: `⚠️ تحذير هبوط من القمة (${st.name})!`,
-                              body: `هبط سعر ${st.name} بنسبة -${dropFromPeak.toFixed(2)}% عن أعلى قمة (${currentPeak} USDT). يُنصح بالخروج السريع لـ USDT!`,
-                              tag: `trailing-${st.id}`,
-                              icon: '/pwa-192x192.png',
-                              badge: '/icon.svg',
-                              renotify: true,
-                              requireInteraction: true,
-                            });
-                          }
-                        }
-                      }
-
-                      if (hasChanges) {
-                        return { ...st, priceHistory: newHistory };
-                      }
-                    } else if (hasChanges) {
-                      return { ...st, priceHistory: newHistory };
-                    }
-                  }
-                  return st;
-                });
-
-                if (hasChanges) {
-                  persistScalpTradesRef.current(next);
-                  return next;
-                }
-                return prev;
-              });
-
-              // 3. Update Watchlist and Trigger Instant Price Alerts (إشعار Push ونغمة صوتية)
-              setWatchlistItems((prev) => {
-                let hasAlertFired = false;
-                const next = prev.map((item) => {
-                  if (item.symbol === symbol && item.hasAlert && item.alertPrice) {
-                    const targetNum = parseFloat(item.alertPrice);
-                    if (!isNaN(targetNum) && targetNum > 0) {
-                      const isTriggered = 
-                        (item.alertDirection === 'above' && priceNum >= targetNum) ||
-                        (item.alertDirection === 'below' && priceNum <= targetNum) ||
-                        (!item.alertDirection && Math.abs(priceNum - targetNum) / targetNum < 0.002);
-
-                      if (isTriggered) {
-                        hasAlertFired = true;
-                        systemNotification.sendNotification({
-                          title: `🎯 تنبيه سعري فوري (${item.name})!`,
-                          body: `وصل سعر ${item.name} إلى ${priceNum} USDT (المستهدف: ${targetNum} USDT).`,
-                          tag: `wl-alert-${item.id}`,
-                          icon: '/pwa-192x192.png',
-                          badge: '/icon.svg',
-                          renotify: true,
-                          requireInteraction: true,
-                        });
-
-                        return {
-                          ...item,
-                          hasAlert: false, // Deactivate once fired
-                        };
-                      }
-                    }
-                  }
-                  return item;
-                });
-
-                if (hasAlertFired) {
-                  persistWatchlistItemsRef.current(next);
-                  return next;
-                }
-                return prev;
-              });
-            }
+            processPriceUpdate(symbol, price);
           }
         } catch {
           // Ignore
@@ -1108,7 +1123,89 @@ export default function CalculatorPage() {
         trackerWsRef.current = null;
       }
     };
-  }, [isTrackerStreamActive, trackedSymbolsKey]);
+  }, [isTrackerStreamActive, trackedSymbolsKey, processPriceUpdate]);
+
+  // Continuous Background Price Worker (runs independently of DOM throttling in background tabs)
+  const bgWorkerRef = useRef<Worker | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isTrackerStreamActive) return;
+
+    const tr = trackedCurrencies.map((tc) => tc.binanceSymbol.toUpperCase());
+    const sc = scalpTrades.map((st) => st.binanceSymbol.toUpperCase());
+    const wl = watchlistItems.map((wi) => wi.symbol.toUpperCase());
+    const rg = rangeStreamSymbols.map((s) => s.toUpperCase());
+    const symbolsList = Array.from(new Set([...tr, ...sc, ...wl, ...rg])).filter(Boolean);
+
+    if (symbolsList.length === 0) return;
+
+    // Check if any alerts are active to activate background keep-alive
+    const hasActiveAlerts = 
+      watchlistItems.some((wi) => wi.hasAlert && wi.alertPrice) ||
+      scalpTrades.some((st) => st.isActive !== false && st.alertsEnabled) ||
+      currencies.some((c) => c.isMonitoringActive && c.targetPrice);
+
+    if (hasActiveAlerts) {
+      soundAlert.enableBackgroundKeepAlive();
+    }
+
+    try {
+      if (!bgWorkerRef.current && 'Worker' in window) {
+        const worker = new Worker('/backgroundPriceWorker.js');
+        bgWorkerRef.current = worker;
+        worker.onmessage = (e) => {
+          if (e.data && e.data.type === 'PRICE_UPDATE' && e.data.prices) {
+            const priceMap: Record<string, string> = e.data.prices;
+            Object.entries(priceMap).forEach(([sym, p]) => {
+              processPriceUpdate(sym, p);
+            });
+          }
+        };
+      }
+
+      if (bgWorkerRef.current) {
+        bgWorkerRef.current.postMessage({
+          type: 'START_MONITORING',
+          symbols: symbolsList,
+          intervalMs: 3500,
+        });
+      }
+    } catch {
+      // Ignore
+    }
+
+    return () => {
+      if (bgWorkerRef.current) {
+        bgWorkerRef.current.postMessage({ type: 'STOP_MONITORING' });
+      }
+    };
+  }, [isTrackerStreamActive, trackedCurrencies, scalpTrades, watchlistItems, rangeStreamSymbols, currencies, processPriceUpdate]);
+
+  // Keep background monitoring alive when screen locks or tab changes visibility
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const handleVisibilityChange = () => {
+      const hasActiveAlerts = 
+        watchlistItems.some((wi) => wi.hasAlert && wi.alertPrice) ||
+        scalpTrades.some((st) => st.isActive !== false && st.alertsEnabled) ||
+        currencies.some((c) => c.isMonitoringActive && c.targetPrice);
+
+      if (hasActiveAlerts) {
+        soundAlert.enableBackgroundKeepAlive();
+      }
+
+      if (document.visibilityState === 'visible') {
+        // Returned to foreground: ensure WebSocket is refreshed if needed
+        if (isTrackerStreamActive && trackerWsRef.current && trackerWsRef.current.readyState !== WebSocket.OPEN) {
+          // Reconnect happens automatically via state trigger
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [watchlistItems, scalpTrades, currencies, isTrackerStreamActive]);
 
   // ----------------------------------------------------
   // SCALPER ACTIONS & HANDLERS

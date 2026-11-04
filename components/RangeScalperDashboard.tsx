@@ -501,12 +501,44 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
   };
 
   // -------------------------------------------------------------
-  // REAL-TIME SMART NOTIFICATION ENGINE (شروط التنبيه المتعددة)
+  // REAL-TIME SMART NOTIFICATION ENGINE (شروط التنبيه المتعددة مع الحفظ الدائم)
   // -------------------------------------------------------------
   const lastAlertTimesRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('price_calc_v0_range_alert_timestamps');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            Object.entries(parsed).forEach(([k, v]) => {
+              if (typeof v === 'number') lastAlertTimesRef.current.set(k, v);
+            });
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }
+  }, []);
+
+  const persistRangeAlertTimes = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const obj: Record<string, number> = {};
+      lastAlertTimesRef.current.forEach((v, k) => {
+        obj[k] = v;
+      });
+      localStorage.setItem('price_calc_v0_range_alert_timestamps', JSON.stringify(obj));
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  useEffect(() => {
     const now = Date.now();
+    let anyAlertArmed = false;
 
     trades.forEach((trade) => {
       if (trade.isActive === false) return;
@@ -517,6 +549,9 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
 
       const cfg = trade.alertConfig || DEFAULT_RANGE_ALERT_CONFIG;
       const isAlertActive = trade.alertsEnabled && cfg.enabled;
+      if (isAlertActive) {
+        anyAlertArmed = true;
+      }
 
       // Helper to check repeat interval
       const canFire = (conditionKey: string): boolean => {
@@ -532,6 +567,7 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
       const recordFired = (conditionKey: string) => {
         const fullKey = `${trade.id}_${conditionKey}`;
         lastAlertTimesRef.current.set(fullKey, now);
+        persistRangeAlertTimes();
         soundAlert.playTone((cfg.toneId as AlertToneId) || 'celebration');
       };
 
@@ -645,7 +681,11 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
         }
       }
     });
-  }, [trades, livePrices]);
+
+    if (anyAlertArmed) {
+      soundAlert.enableBackgroundKeepAlive();
+    }
+  }, [trades, livePrices, persistRangeAlertTimes]);
 
   // Active trades and closed trades
   const activeTrades = useMemo(() => {

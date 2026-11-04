@@ -81,10 +81,54 @@ export const DEFAULT_ALERT_SETTINGS: AppAlertSettings = {
 };
 
 export const STORAGE_KEY_APP_ALERT_SETTINGS = 'price_calc_v0_unified_alert_settings';
+export const STORAGE_KEY_ALERT_FIRING_HISTORY = 'price_calc_v0_alert_firing_history';
 
-// سجل زمني لآخر إطلاق للتنبيهات للتحكم بالتكرار
+// سجل زمني دائم لآخر إطلاق للتنبيهات للتحكم بالتكرار وحفظ الحالة عبر التحديث وإعادة الفتح
 const lastTriggerTimestamps = new Map<string, number>();
 const firedOnceSet = new Set<string>();
+
+function loadFiringHistoryFromStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ALERT_FIRING_HISTORY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.firedOnce)) {
+        parsed.firedOnce.forEach((k: string) => firedOnceSet.add(k));
+      }
+      if (parsed.timestamps && typeof parsed.timestamps === 'object') {
+        Object.entries(parsed.timestamps).forEach(([k, v]) => {
+          if (typeof v === 'number') {
+            lastTriggerTimestamps.set(k, v);
+          }
+        });
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+function saveFiringHistoryToStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    const timestampsObj: Record<string, number> = {};
+    lastTriggerTimestamps.forEach((v, k) => {
+      timestampsObj[k] = v;
+    });
+    const payload = {
+      firedOnce: Array.from(firedOnceSet),
+      timestamps: timestampsObj,
+      updatedAt: Date.now(),
+    };
+    localStorage.setItem(STORAGE_KEY_ALERT_FIRING_HISTORY, JSON.stringify(payload));
+  } catch {
+    // Ignore
+  }
+}
+
+// تحميل السجل فورياً عند استدعاء الوحدة في المتصفح
+loadFiringHistoryFromStorage();
 
 type Listener = (settings: AppAlertSettings) => void;
 const listeners = new Set<Listener>();
@@ -154,19 +198,21 @@ export function canTriggerAlert(typeId: AlertTypeId, instanceId: string = 'globa
 }
 
 /**
- * تسجيل حدوث التنبيه لتطبيق قيود الفاصل الزمني والتكرار
+ * تسجيل حدوث التنبيه لتطبيق قيود الفاصل الزمني والتكرار وحفظها دائمياً
  */
 export function recordAlertTriggered(typeId: AlertTypeId, instanceId: string = 'global'): void {
   const key = `${typeId}_${instanceId}`;
   firedOnceSet.add(key);
   lastTriggerTimestamps.set(key, Date.now());
+  saveFiringHistoryToStorage();
 }
 
 /**
- * إعادة تعيين حالة التنبيه لعملة أو خط معين
+ * إعادة تعيين حالة التنبيه لعملة أو خط معين عند قيام المستخدم بتعديل التنبيه أو حذفه
  */
 export function resetAlertTrigger(typeId: AlertTypeId, instanceId: string = 'global'): void {
   const key = `${typeId}_${instanceId}`;
   firedOnceSet.delete(key);
   lastTriggerTimestamps.delete(key);
+  saveFiringHistoryToStorage();
 }

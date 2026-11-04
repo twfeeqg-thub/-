@@ -139,12 +139,37 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
   const timelinePercent = (makkahTime.decimalHours / 24) * 100;
 
   // -------------------------------------------------------------
-  // REAL-TIME SESSION ALERT MONITOR (إطلاق التنبيهات المعتمدة)
+  // REAL-TIME SESSION ALERT MONITOR (إطلاق التنبيهات المعتمدة مع الحفظ الدائم)
   // -------------------------------------------------------------
   const firedSessionAlertsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('price_calc_v0_market_sessions_fired_alerts');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) parsed.forEach((k: string) => firedSessionAlertsRef.current.add(k));
+        }
+      } catch {
+        // Ignore
+      }
+    }
+  }, []);
+
+  const persistSessionAlerts = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem('price_calc_v0_market_sessions_fired_alerts', JSON.stringify(Array.from(firedSessionAlertsRef.current)));
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  useEffect(() => {
     if (!alertConfig.enabled) return;
+
+    soundAlert.enableBackgroundKeepAlive();
 
     const currentHour = makkahTime.hours;
     const currentMinute = makkahTime.minutes;
@@ -155,6 +180,7 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
       const overlapKey = `${todayDateKey}_golden_overlap`;
       if (!firedSessionAlertsRef.current.has(overlapKey)) {
         firedSessionAlertsRef.current.add(overlapKey);
+        persistSessionAlerts();
         soundAlert.playTone((alertConfig.soundTone as AlertToneId) || 'bell');
         systemNotification.sendNotification({
           title: '🔥 بدأت ذروة السيولة العالمية (لندن + نيويورك)!',
@@ -175,6 +201,7 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
         const preKey = `${todayDateKey}_${session.id}_pre_${currentHour}_${currentMinute}`;
         if (!firedSessionAlertsRef.current.has(preKey)) {
           firedSessionAlertsRef.current.add(preKey);
+          persistSessionAlerts();
           soundAlert.playTone((alertConfig.soundTone as AlertToneId) || 'bell');
           systemNotification.sendNotification({
             title: `⏳ اقترب افتتاح ${session.name}!`,
@@ -191,6 +218,7 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
         const openKey = `${todayDateKey}_${session.id}_open`;
         if (!firedSessionAlertsRef.current.has(openKey)) {
           firedSessionAlertsRef.current.add(openKey);
+          persistSessionAlerts();
           soundAlert.playTone((alertConfig.soundTone as AlertToneId) || 'bell');
           systemNotification.sendNotification({
             title: `🟢 افتتحت الآن ${session.name}!`,
@@ -202,7 +230,7 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
         }
       }
     });
-  }, [makkahTime, alertConfig, isOverlap]);
+  }, [makkahTime, alertConfig, isOverlap, persistSessionAlerts]);
 
   return (
     <div 

@@ -48,6 +48,9 @@ class SoundAlertPlayer {
     }
   }
 
+  private keepAliveAudio: HTMLAudioElement | null = null;
+  private isKeepAliveActive: boolean = false;
+
   private getAudioContext(): AudioContext | null {
     if (typeof window === 'undefined') return null;
     if (!this.audioCtx) {
@@ -60,6 +63,44 @@ class SoundAlertPlayer {
       this.audioCtx.resume();
     }
     return this.audioCtx;
+  }
+
+  /**
+   * تفعيل جلسة صوتية خلفية لمنع تعليق النظام والتطبيق أثناء قفل الشاشة أو تشغيل تطبيقات أخرى
+   */
+  public enableBackgroundKeepAlive() {
+    if (typeof window === 'undefined' || this.isKeepAliveActive) return;
+    try {
+      if (!this.keepAliveAudio) {
+        // نغمة صامتة تماماً (Silent loop) بحجم بضعة بايتات تحافظ على أولوية عمل تطبيق التنبيهات في الخلفية
+        const silentWav = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+        const audio = new Audio(silentWav);
+        audio.loop = true;
+        audio.volume = 0.0001;
+        this.keepAliveAudio = audio;
+      }
+      this.keepAliveAudio.play().then(() => {
+        this.isKeepAliveActive = true;
+      }).catch(() => {
+        // يتم التفعيل تلقائياً عند أول لمسة أو تفاعل للمستخدم
+      });
+      this.getAudioContext();
+    } catch {
+      // Ignore
+    }
+  }
+
+  public disableBackgroundKeepAlive() {
+    if (this.keepAliveAudio) {
+      try {
+        this.keepAliveAudio.pause();
+      } catch {}
+      this.isKeepAliveActive = false;
+    }
+  }
+
+  public isBackgroundAudioActive(): boolean {
+    return this.isKeepAliveActive;
   }
 
   public setMuted(muted: boolean) {

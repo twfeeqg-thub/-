@@ -13,9 +13,13 @@ interface AddWatchlistSymbolModalProps {
 }
 
 const POPULAR_CRYPTO_SUGGESTIONS = [
+  { symbol: 'STONFI2:ATFUSDT_EQAY5H', name: 'ATF', desc: 'ATF / USDT (STON.fi • TON)' },
   { symbol: 'BTCUSDT', name: 'BTC', desc: 'Bitcoin' },
   { symbol: 'ETHUSDT', name: 'ETH', desc: 'Ethereum' },
   { symbol: 'SOLUSDT', name: 'SOL', desc: 'Solana' },
+  { symbol: 'TONUSDT', name: 'TON', desc: 'Toncoin (TON & Binance)' },
+  { symbol: 'NOTUSDT', name: 'NOT', desc: 'Notcoin (TON)' },
+  { symbol: 'DOGSUSDT', name: 'DOGS', desc: 'Dogs (TON)' },
   { symbol: 'BNBUSDT', name: 'BNB', desc: 'Binance Coin' },
   { symbol: 'DOGEUSDT', name: 'DOGE', desc: 'Dogecoin' },
   { symbol: 'PEPEUSDT', name: 'PEPE', desc: 'Pepe' },
@@ -46,7 +50,11 @@ export const AddWatchlistSymbolModal: React.FC<AddWatchlistSymbolModalProps> = (
 
   const handleAdd = (sym: string) => {
     let clean = sym.trim().toUpperCase();
-    if (!clean.endsWith('USDT') && !clean.endsWith('BUSD') && !clean.endsWith('USD')) {
+    if (clean.includes(':') || clean.includes('_EQ') || clean.startsWith('EQ')) {
+      // Keep exact DEX / blockchain / multi-exchange format intact
+    } else if (clean === 'ATF') {
+      clean = 'STONFI2:ATFUSDT_EQAY5H';
+    } else if (!clean.endsWith('USDT') && !clean.endsWith('BUSD') && !clean.endsWith('USD')) {
       clean = `${clean}USDT`;
     }
     onAddSymbol(clean, selectedCategory, selectedFlag);
@@ -77,7 +85,7 @@ export const AddWatchlistSymbolModal: React.FC<AddWatchlistSymbolModalProps> = (
                 إضافة رمز جديد إلى قائمة المراقبة
               </h3>
               <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
-                ابحث في جميع أزواج Binance المتاحة
+                ابحث في جميع العملات والمنصات (Binance و DEX ورموز TON)
               </span>
             </div>
           </div>

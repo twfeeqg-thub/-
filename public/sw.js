@@ -164,3 +164,13 @@ self.addEventListener('push', (event) => {
     );
   }
 });
+
+// 7. Message Event Handler (Communication from Client / Background Alert Engine)
+self.addEventListener('message', (event) => {
+  if (!event.data) return;
+  if (event.data.type === 'SHOW_NOTIFICATION') {
+    const { title, options } = event.data;
+    event.waitUntil(self.registration.showNotification(title, options || {}));
+  }
+});
+

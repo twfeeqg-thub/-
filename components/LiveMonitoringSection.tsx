@@ -214,6 +214,9 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
       return;
     }
 
+    // Enable background keep-alive audio session when monitoring is active
+    soundAlert.enableBackgroundKeepAlive();
+
     const pairLower = formattedSymbol.toLowerCase();
 
     // Initial immediate fetch

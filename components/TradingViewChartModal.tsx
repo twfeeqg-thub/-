@@ -35,7 +35,10 @@ import {
   FileText,
   Bookmark,
   Activity,
-  BarChart3
+  BarChart3,
+  Search,
+  Globe,
+  Sparkles
 } from 'lucide-react';
 import { CoinAvatar } from './CoinAvatar';
 import { trimTrailingZeros } from '@/lib/calculator';
@@ -43,6 +46,113 @@ import { useTheme } from '@/context/ThemeContext';
 import { systemNotification } from '@/lib/systemNotification';
 import { soundAlert } from '@/lib/soundAlert';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
+
+export interface ResolvedSymbolInfo {
+  fullTradingViewSymbol: string;
+  exchangeName: string;
+  exchangeBadge: string;
+  cleanPairName: string;
+  baseToken: string;
+  isDex: boolean;
+  dexChain?: string;
+}
+
+export function parseSmartSymbol(rawInput: string, forcedExchange?: string): ResolvedSymbolInfo {
+  const trimmed = (rawInput || '').trim();
+  if (!trimmed) {
+    return {
+      fullTradingViewSymbol: 'BINANCE:BTCUSDT',
+      exchangeName: 'BINANCE',
+      exchangeBadge: 'BINANCE',
+      cleanPairName: 'BTCUSDT',
+      baseToken: 'BTC',
+      isDex: false,
+    };
+  }
+
+  // 1. Explicit Exchange in Symbol (e.g. "STONFI2:ATFUSDT_EQAY5H", "BYBIT:BTCUSDT")
+  if (trimmed.includes(':')) {
+    const parts = trimmed.split(':');
+    const ex = parts[0].toUpperCase();
+    const sym = parts[1];
+    const isTon = ex.includes('STON') || ex.includes('DEDUST') || ex.includes('TON');
+    const isDex = isTon || ex.includes('UNISWAP') || ex.includes('PANCAKE') || ex.includes('RAYDIUM') || ex.includes('DEX');
+    const base = sym.split(/[_/]/)[0].replace(/USDT|USDC|USD/i, '') || sym;
+    return {
+      fullTradingViewSymbol: `${ex}:${sym}`,
+      exchangeName: isTon ? 'STON.fi (TON)' : ex,
+      exchangeBadge: isTon ? 'STON.fi' : ex,
+      cleanPairName: sym,
+      baseToken: base,
+      isDex,
+      dexChain: isTon ? 'TON' : isDex ? 'DEX' : undefined,
+    };
+  }
+
+  // 2. User selected a specific exchange (e.g. STONFI2, BYBIT, OKX, BINANCE)
+  if (forcedExchange && forcedExchange !== 'AUTO') {
+    const ex = forcedExchange.toUpperCase();
+    let pair = trimmed.toUpperCase();
+    if (!pair.includes('_') && !pair.endsWith('USDT') && !pair.endsWith('USD') && !pair.endsWith('USDC')) {
+      pair = `${pair}USDT`;
+    }
+    const isTon = ex.includes('STON') || ex.includes('TON');
+    const isDex = isTon || ex.includes('DEX');
+    const base = pair.split(/[_/]/)[0].replace(/USDT|USDC|USD/i, '') || pair;
+    return {
+      fullTradingViewSymbol: `${ex}:${pair}`,
+      exchangeName: isTon ? 'STON.fi (TON)' : ex,
+      exchangeBadge: isTon ? 'STON.fi' : ex,
+      cleanPairName: pair,
+      baseToken: base,
+      isDex,
+      dexChain: isTon ? 'TON' : undefined,
+    };
+  }
+
+  // 3. Detect known TON on-chain DEX pairs or contract patterns (e.g. ATF, ATFUSDT_EQAY5H, contains _EQ)
+  const upper = trimmed.toUpperCase();
+  if (upper === 'ATF' || upper === 'ATFUSDT' || upper.startsWith('ATFUSDT_') || upper.includes('_EQ') || upper.startsWith('EQ')) {
+    const pair = upper === 'ATF' || upper === 'ATFUSDT' ? 'ATFUSDT_EQAY5H' : upper;
+    return {
+      fullTradingViewSymbol: `STONFI2:${pair}`,
+      exchangeName: 'STON.fi (TON DEX)',
+      exchangeBadge: 'TON • STON.fi',
+      cleanPairName: pair,
+      baseToken: 'ATF',
+      isDex: true,
+      dexChain: 'TON',
+    };
+  }
+
+  // 4. Underscore DEX pools without exchange prefix
+  if (upper.includes('_') && !upper.startsWith('BINANCE:')) {
+    return {
+      fullTradingViewSymbol: `STONFI2:${upper}`,
+      exchangeName: 'STON.fi (TON DEX)',
+      exchangeBadge: 'TON • STON.fi',
+      cleanPairName: upper,
+      baseToken: upper.split('_')[0].replace('USDT', ''),
+      isDex: true,
+      dexChain: 'TON',
+    };
+  }
+
+  // 5. Default standard CEX crypto (Binance)
+  let clean = upper;
+  if (!clean.endsWith('USDT') && !clean.endsWith('BUSD') && !clean.endsWith('USD')) {
+    clean = `${clean}USDT`;
+  }
+  const base = clean.replace(/USDT|BUSD|USD/, '');
+  return {
+    fullTradingViewSymbol: `BINANCE:${clean}`,
+    exchangeName: 'BINANCE',
+    exchangeBadge: 'BINANCE',
+    cleanPairName: clean,
+    baseToken: base,
+    isDex: false,
+  };
+}
 
 export interface TechnicalIndicatorConfig {
   id: string;
@@ -168,10 +278,31 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   const [showTvTip, setShowTvTip] = useState(false);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
 
-  // Clean symbol for Binance (e.g. BTCUSDT)
-  const cleanSymbol = symbol.trim().toUpperCase();
-  const binanceSymbol = cleanSymbol.endsWith('USDT') ? cleanSymbol : `${cleanSymbol}USDT`;
-  const baseAsset = currencyName.trim().toUpperCase() || binanceSymbol.replace('USDT', '');
+  // Dynamic Smart Symbol Resolution & Switching
+  const [userSelectedSymbol, setUserSelectedSymbol] = useState<string | null>(null);
+  const [currentExchange, setCurrentExchange] = useState<string>('AUTO');
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [searchSymbolInput, setSearchSymbolInput] = useState('');
+  const [selectedExchangeFilter, setSelectedExchangeFilter] = useState<'AUTO' | 'BINANCE' | 'STONFI2' | 'BYBIT' | 'OKX'>('AUTO');
+
+  // React pattern: Reset custom selection when the underlying currency/symbol prop changes
+  const [prevPropSymbol, setPrevPropSymbol] = useState(symbol);
+  if (symbol !== prevPropSymbol) {
+    setPrevPropSymbol(symbol);
+    setUserSelectedSymbol(null);
+    setCurrentExchange('AUTO');
+  }
+
+  const activeRawSymbol = userSelectedSymbol || symbol;
+
+  const resolvedSymbolInfo = useMemo(() => {
+    return parseSmartSymbol(activeRawSymbol, currentExchange);
+  }, [activeRawSymbol, currentExchange]);
+
+  // Clean symbol and base asset derived from smart resolution
+  const cleanSymbol = resolvedSymbolInfo.cleanPairName;
+  const binanceSymbol = resolvedSymbolInfo.cleanPairName;
+  const baseAsset = resolvedSymbolInfo.baseToken || currencyName.trim().toUpperCase() || 'CRYPTO';
 
   // Persistent Technical Indicators across ALL charts and currencies
   const [activeStudies, setActiveStudies] = useState<string[]>(() => {
@@ -517,6 +648,10 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
           return updated;
         });
       }, 0);
+    }
+
+    if (exitAlertActive || customLines.some((l) => l.hasAlert)) {
+      soundAlert.enableBackgroundKeepAlive();
     }
   }, [currentPriceNum, exitAlertActive, exitAlertPrice, entryNum, binanceSymbol, baseAsset, customLines, persistCustomLines, persistExitAlert]);
 
@@ -911,16 +1046,16 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     }
   };
 
-  // Official isolated TradingView embed URL with Binance feed & dynamic theme & persistent technical studies
+  // Official isolated TradingView embed URL with smart dynamic exchange feed (Binance, STON.fi, Bybit, etc.) & persistent technical studies
   const iframeSrc = useMemo(() => {
     const toolbarColor = isDark ? '0f172a' : 'ffffff';
     const studiesParam = activeStudies.length > 0 
       ? `&studies=${encodeURIComponent(JSON.stringify(activeStudies))}` 
       : '';
-    return `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_advanced_chart&symbol=BINANCE%3A${encodeURIComponent(
-      binanceSymbol
+    return `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_advanced_chart&symbol=${encodeURIComponent(
+      resolvedSymbolInfo.fullTradingViewSymbol
     )}&interval=${chartInterval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=${toolbarColor}&theme=${chartTheme}&style=1&timezone=Etc%2FUTC&locale=ar_AE&allow_symbol_change=1&details=1&withdateranges=1${studiesParam}`;
-  }, [binanceSymbol, chartTheme, isDark, chartInterval, activeStudies]);
+  }, [resolvedSymbolInfo.fullTradingViewSymbol, chartTheme, isDark, chartInterval, activeStudies]);
 
   if (!isOpen) return null;
 
@@ -979,13 +1114,30 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 <div className="flex items-center gap-2 mr-1">
                   <CoinAvatar symbol={baseAsset} size="md" />
                   <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono font-black text-base tracking-tight">
-                        {binanceSymbol}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono font-black text-base tracking-tight" title={resolvedSymbolInfo.fullTradingViewSymbol}>
+                        {resolvedSymbolInfo.cleanPairName}
                       </span>
-                      <span className="text-[10px] font-black font-mono px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                        BINANCE
+                      <span className={`text-[10px] font-black font-mono px-2 py-0.5 rounded-md border flex items-center gap-1 ${
+                        resolvedSymbolInfo.isDex
+                          ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 shadow-xs'
+                          : 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                      }`}>
+                        {resolvedSymbolInfo.isDex && <Globe className="w-3 h-3 text-blue-400" />}
+                        {resolvedSymbolInfo.exchangeBadge}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchSymbolInput(activeRawSymbol);
+                          setIsSearchModalOpen(true);
+                        }}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
+                        title="بحث شامل وتغيير الرمز أو المنصة (STON.fi / Binance / Bybit / OKX / على البلوكتشين)"
+                      >
+                        <Search className="w-3 h-3" />
+                        <span>بحث شامل / تغيير</span>
+                      </button>
                     </div>
                     {livePrice && (
                       <div className="flex items-center gap-1.5 text-xs font-mono font-black text-emerald-600 dark:text-emerald-400">
@@ -1454,10 +1606,10 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
           className={`relative flex-1 w-full h-full min-h-[350px] ${isDark ? 'bg-slate-950' : 'bg-white'}`}
         >
           <iframe
-            key={`${binanceSymbol}-${chartTheme}-${chartInterval}-${activeStudies.join(',')}`}
+            key={`${resolvedSymbolInfo.fullTradingViewSymbol}-${chartTheme}-${chartInterval}-${activeStudies.join(',')}`}
             src={iframeSrc}
             className="w-full h-full border-0 block pointer-events-auto"
-            title={`TradingView Chart for ${binanceSymbol}`}
+            title={`TradingView Chart for ${resolvedSymbolInfo.fullTradingViewSymbol}`}
             allow="fullscreen; clipboard-write"
             loading="lazy"
           />
@@ -1772,7 +1924,10 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                       <div>
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono font-black text-sm tracking-tight">
-                            {binanceSymbol}
+                            {resolvedSymbolInfo.cleanPairName}
+                          </span>
+                          <span className="text-[9px] font-black font-mono px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                            {resolvedSymbolInfo.exchangeBadge}
                           </span>
                           {livePrice && (
                             <span className="font-mono font-black text-xs text-emerald-600 dark:text-emerald-400" dir="ltr">
@@ -2503,6 +2658,225 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               >
                 إغلاق
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. MODAL: UNIVERSAL SEARCH & EXCHANGE SWITCHER (DEX & CEX)                 */}
+      {/* ========================================================================= */}
+      {isSearchModalOpen && (
+        <div 
+          className="fixed inset-0 z-[85] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md cursor-pointer"
+          dir="rtl"
+          onClick={() => setIsSearchModalOpen(false)}
+        >
+          <div 
+            className="w-full max-w-lg p-5 sm:p-6 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                  <Search className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white">
+                    البحث الشامل ومحرك الشارت الذكي (DEX & CEX)
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    عرض شارت أي عملة على البلوكتشين (STON.fi / TON) أو المنصات المركزية
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSearchModalOpen(false)}
+                className="p-1 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                title="إغلاق النافذة"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Exchange Filter Selector */}
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1.5">
+                تحديد المنصة / الشبكة:
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                {[
+                  { id: 'AUTO', label: 'تلقائي ذكي (موصى به)', badge: 'ذكي' },
+                  { id: 'STONFI2', label: 'STON.fi (TON DEX)', badge: 'TON' },
+                  { id: 'BINANCE', label: 'Binance (فوري)', badge: 'CEX' },
+                  { id: 'BYBIT', label: 'Bybit', badge: 'CEX' },
+                  { id: 'OKX', label: 'OKX', badge: 'CEX' },
+                ].map((item) => {
+                  const isSel = selectedExchangeFilter === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setSelectedExchangeFilter(item.id as any)}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between border cursor-pointer ${
+                        isSel
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
+                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+                      }`}
+                    >
+                      <span>{item.label}</span>
+                      <span className="text-[9px] px-1 py-0.2 rounded bg-slate-700/80 text-slate-300 font-mono">
+                        {item.badge}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Search Input Bar */}
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                const clean = searchSymbolInput.trim();
+                if (clean) {
+                  setUserSelectedSymbol(clean);
+                  setCurrentExchange(selectedExchangeFilter);
+                  setIsSearchModalOpen(false);
+                }
+              }}
+              className="space-y-2"
+            >
+              <label className="text-xs font-bold text-slate-300 block">
+                اكتب رمز العملة أو عنوان العقد / Pool:
+              </label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={searchSymbolInput}
+                    onChange={(e) => setSearchSymbolInput(e.target.value)}
+                    placeholder="مثال: ATF أو STONFI2:ATFUSDT_EQAY5H أو BTCUSDT"
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 font-mono font-bold text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                    autoFocus
+                  />
+                  {searchSymbolInput && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchSymbolInput('')}
+                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  disabled={!searchSymbolInput.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  عرض الشارت
+                </button>
+              </div>
+            </form>
+
+            {/* Quick Suggestions & TON Blockchain Tokens */}
+            <div className="space-y-3 pt-2">
+              <div>
+                <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1.5">
+                  <Globe className="w-3.5 h-3.5 text-blue-400" />
+                  <span>عملات البلوكتشين و DEX (STON.fi / TON):</span>
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    {
+                      sym: 'STONFI2:ATFUSDT_EQAY5H',
+                      name: 'ATF / USDT',
+                      network: 'STON.fi (TON)',
+                      desc: 'عملة محفظة باينانس اللامركزية على TON',
+                    },
+                    {
+                      sym: 'TONUSDT',
+                      name: 'TON / USDT',
+                      network: 'Toncoin',
+                      desc: 'عملة شبكة التلغرام الأساسية',
+                    },
+                    {
+                      sym: 'NOTUSDT',
+                      name: 'NOT / USDT',
+                      network: 'Notcoin (TON)',
+                      desc: 'رمز Notcoin على شبكة TON',
+                    },
+                    {
+                      sym: 'DOGSUSDT',
+                      name: 'DOGS / USDT',
+                      network: 'Dogs (TON)',
+                      desc: 'رمز Dogs على شبكة TON',
+                    },
+                  ].map((item) => (
+                    <button
+                      key={item.sym}
+                      type="button"
+                      onClick={() => {
+                        setUserSelectedSymbol(item.sym);
+                        setCurrentExchange('AUTO');
+                        setIsSearchModalOpen(false);
+                      }}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-blue-950/30 hover:bg-blue-900/40 border border-blue-800/40 hover:border-blue-700 text-right transition cursor-pointer group"
+                    >
+                      <div>
+                        <div className="font-mono font-black text-xs text-blue-300 group-hover:text-blue-200">
+                          {item.name}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {item.desc}
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                        {item.network}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>أشهر العملات في منصة باينانس (Spot):</span>
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'PEPEUSDT', 'SUIUSDT', 'NEARUSDT', 'AVAXUSDT'].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => {
+                        setUserSelectedSymbol(s);
+                        setCurrentExchange('BINANCE');
+                        setIsSearchModalOpen(false);
+                      }}
+                      className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-amber-400 hover:text-slate-950 text-slate-300 text-xs font-mono font-bold transition cursor-pointer border border-slate-700 hover:border-amber-400"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Smart Engine Hint */}
+            <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 leading-relaxed space-y-1">
+              <div className="flex items-center gap-1.5 text-amber-400 font-bold">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>كيف يعمل محرك الشارت الذكي مع رموز البلوكتشين؟</span>
+              </div>
+              <p>
+                عملات البلوكتشين اللامركزية (مثل ATF على شبكة TON) تُدرج عبر مجمعات السيولة في STON.fi.
+                يقوم محركنا الذكي بالتعرف الفوري على رموز TON وصيغ العقود وتحويلها مباشرة إلى تغذية TradingView المعتمدة (مثل <code className="text-amber-300 font-mono">STONFI2:ATFUSDT_EQAY5H</code>) لتعمل بدون أي حظر أو رسائل خطأ.
+              </p>
             </div>
           </div>
         </div>
