@@ -20,43 +20,10 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
   forceShow = false,
   onFinish,
 }) => {
-  const [settings] = useState<SplashSettings>(() => {
-    if (typeof window === 'undefined') return DEFAULT_SPLASH_SETTINGS;
-    try {
-      const rawSettings = localStorage.getItem(STORAGE_KEY_SPLASH_SETTINGS);
-      return rawSettings ? JSON.parse(rawSettings) : DEFAULT_SPLASH_SETTINGS;
-    } catch {
-      return DEFAULT_SPLASH_SETTINGS;
-    }
-  });
-
-  const [isVisible, setIsVisible] = useState<boolean>(() => {
-    if (forceShow) return true;
-    if (typeof window === 'undefined') return true;
-    try {
-      const rawSettings = localStorage.getItem(STORAGE_KEY_SPLASH_SETTINGS);
-      const parsed: SplashSettings = rawSettings ? JSON.parse(rawSettings) : DEFAULT_SPLASH_SETTINGS;
-      if (!parsed.enabled) return false;
-      if (parsed.showOncePerSession) {
-        const shown = sessionStorage.getItem(SESSION_KEY_SPLASH_SHOWN);
-        if (shown === 'true') return false;
-      }
-    } catch {}
-    return true;
-  });
-
-  const [selectedPhrase] = useState<SplashPhrase>(() => {
-    try {
-      if (typeof window !== 'undefined') {
-        const rawSettings = localStorage.getItem(STORAGE_KEY_SPLASH_SETTINGS);
-        const parsed = rawSettings ? JSON.parse(rawSettings) : DEFAULT_SPLASH_SETTINGS;
-        const phrases = parsed.phrases && parsed.phrases.length > 0 ? parsed.phrases : DEFAULT_SPLASH_SETTINGS.phrases;
-        return phrases[Math.floor(Math.random() * phrases.length)] || DEFAULT_SPLASH_SETTINGS.phrases[0];
-      }
-    } catch {}
-    return DEFAULT_SPLASH_SETTINGS.phrases[0];
-  });
-
+  const [mounted, setMounted] = useState<boolean>(false);
+  const [isVisible, setIsVisible] = useState<boolean>(false);
+  const [settings, setSettings] = useState<SplashSettings>(DEFAULT_SPLASH_SETTINGS);
+  const [selectedPhrase, setSelectedPhrase] = useState<SplashPhrase>(DEFAULT_SPLASH_SETTINGS.phrases[0]);
   const [progress, setProgress] = useState<number>(0);
 
   // Keep onFinish in a ref to prevent dependency re-renders from triggering infinite loops
@@ -76,15 +43,53 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
     onFinishRef.current?.();
   }, []);
 
-  // Dismiss initial HTML preloader once on mount
+  // Hydration-safe initial check after mounting
   useEffect(() => {
-    dismissPreloader();
-    if (isVisible) {
+    const timer = setTimeout(() => {
+      setMounted(true);
+
       try {
+        let activeSettings = DEFAULT_SPLASH_SETTINGS;
+        const rawSettings = localStorage.getItem(STORAGE_KEY_SPLASH_SETTINGS);
+        if (rawSettings) {
+          activeSettings = JSON.parse(rawSettings);
+          setSettings(activeSettings);
+        }
+
+        // Check if should show
+        if (!forceShow) {
+          if (!activeSettings.enabled) {
+            dismissPreloader();
+            setIsVisible(false);
+            return;
+          }
+
+          if (activeSettings.showOncePerSession) {
+            const shown = sessionStorage.getItem(SESSION_KEY_SPLASH_SHOWN);
+            if (shown === 'true') {
+              dismissPreloader();
+              setIsVisible(false);
+              return;
+            }
+          }
+        }
+
+        // Pick a random phrase
+        const phrases = activeSettings.phrases && activeSettings.phrases.length > 0 ? activeSettings.phrases : DEFAULT_SPLASH_SETTINGS.phrases;
+        const randomIndex = Math.floor(Math.random() * phrases.length);
+        setSelectedPhrase(phrases[randomIndex] || DEFAULT_SPLASH_SETTINGS.phrases[0]);
+
+        setIsVisible(true);
         sessionStorage.setItem(SESSION_KEY_SPLASH_SHOWN, 'true');
-      } catch {}
-    }
-  }, [isVisible]);
+      } catch {
+        setIsVisible(false);
+      } finally {
+        dismissPreloader();
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [forceShow]);
 
   // Handle smooth 4-second progress ticker
   useEffect(() => {
@@ -111,7 +116,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
     return () => clearInterval(timer);
   }, [isVisible, settings.durationSeconds, handleComplete]);
 
-  if (!isVisible) return null;
+  if (!mounted || !isVisible) return null;
 
   return (
     <AnimatePresence>

@@ -470,7 +470,9 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
 
   // Ref to keep latest customLines accessible without re-subscribing chart click
   const customLinesRef = useRef<CustomChartLine[]>(customLines);
-  customLinesRef.current = customLines;
+  useEffect(() => {
+    customLinesRef.current = customLines;
+  }, [customLines]);
   const firedAlertsRef = useRef<Set<string>>(new Set());
 
   const handleEditLine = useCallback((line: CustomChartLine) => {
