@@ -2,50 +2,66 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { 
+  X, 
   ArrowRight, 
   Calculator, 
-  Zap, 
-  Copy, 
-  Check, 
-  Maximize2, 
-  Minimize2, 
+  Layers, 
   TrendingUp, 
   TrendingDown,
-  Sun,
-  Moon,
+  LayoutList, 
+  Search, 
+  Plus, 
+  Sliders, 
+  Trash2, 
+  Bell, 
+  BellRing, 
+  Camera, 
+  Maximize2, 
+  Minimize2, 
+  Sun, 
+  Moon, 
+  Activity, 
+  Check, 
+  Copy, 
+  Clock, 
+  Target, 
+  Globe, 
+  Sparkles,
   ChevronDown,
-  ChevronUp,
-  Clock,
-  HelpCircle,
   Eye,
   EyeOff,
-  Sliders,
-  Camera,
-  Plus,
-  Trash2,
-  Bell,
-  BellRing,
-  Target,
-  Edit2,
-  X,
-  GripVertical,
-  RotateCcw,
-  Layers,
-  LayoutList,
-  FileText,
-  Bookmark,
-  Activity,
-  BarChart3,
-  Search,
-  Globe,
-  Sparkles
+  Settings2,
+  RefreshCw
 } from 'lucide-react';
+import { 
+  createChart, 
+  CandlestickSeries, 
+  HistogramSeries, 
+  LineSeries, 
+  ColorType, 
+  LineStyle, 
+  CrosshairMode,
+  IChartApi,
+  ISeriesApi,
+  IPriceLine,
+  UTCTimestamp
+} from 'lightweight-charts';
 import { CoinAvatar } from './CoinAvatar';
 import { trimTrailingZeros } from '@/lib/calculator';
 import { useTheme } from '@/context/ThemeContext';
 import { systemNotification } from '@/lib/systemNotification';
 import { soundAlert } from '@/lib/soundAlert';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
+import { 
+  CandleData, 
+  LinePoint,
+  calculateSMA, 
+  calculateEMA, 
+  calculateBollingerBands, 
+  calculateRSI, 
+  calculateMACD, 
+  formatVolumeData 
+} from '@/lib/chartIndicators';
 
 export interface ResolvedSymbolInfo {
   fullTradingViewSymbol: string;
@@ -89,7 +105,7 @@ export function parseSmartSymbol(rawInput: string, forcedExchange?: string): Res
     };
   }
 
-  // 2. User selected a specific exchange (e.g. STONFI2, BYBIT, OKX, BINANCE)
+  // 2. User selected a specific exchange
   if (forcedExchange && forcedExchange !== 'AUTO') {
     const ex = forcedExchange.toUpperCase();
     let pair = trimmed.toUpperCase();
@@ -110,7 +126,7 @@ export function parseSmartSymbol(rawInput: string, forcedExchange?: string): Res
     };
   }
 
-  // 3. Detect known TON on-chain DEX pairs or contract patterns (e.g. ATF, ATFUSDT_EQAY5H, contains _EQ)
+  // 3. Known TON on-chain DEX pairs
   const upper = trimmed.toUpperCase();
   if (upper === 'ATF' || upper === 'ATFUSDT' || upper.startsWith('ATFUSDT_') || upper.includes('_EQ') || upper.startsWith('EQ')) {
     const pair = upper === 'ATF' || upper === 'ATFUSDT' ? 'ATFUSDT_EQAY5H' : upper;
@@ -125,7 +141,7 @@ export function parseSmartSymbol(rawInput: string, forcedExchange?: string): Res
     };
   }
 
-  // 4. Underscore DEX pools without exchange prefix
+  // 4. Underscore DEX pools
   if (upper.includes('_') && !upper.startsWith('BINANCE:')) {
     return {
       fullTradingViewSymbol: `STONFI2:${upper}`,
@@ -154,27 +170,6 @@ export function parseSmartSymbol(rawInput: string, forcedExchange?: string): Res
   };
 }
 
-export interface TechnicalIndicatorConfig {
-  id: string;
-  name: string;
-  shortName: string;
-  description: string;
-  category: string;
-}
-
-export const POPULAR_INDICATORS: TechnicalIndicatorConfig[] = [
-  { id: 'Volume@tv-basicstudies', name: 'حجم التداول (Volume)', shortName: 'VOL', description: 'أعمدة سيولة التداول والسيولة اللحظية', category: 'السيولة' },
-  { id: 'RSI@tv-basicstudies', name: 'مؤشر القوة النسبية (RSI 14)', shortName: 'RSI', description: 'مناطق ذروة الشراء والبيع والتشبع السعري', category: 'الزخم' },
-  { id: 'MACD@tv-basicstudies', name: 'الماكد (MACD)', shortName: 'MACD', description: 'تقاطعات متوسطات الزخم وإشارات الانعكاس', category: 'الزخم' },
-  { id: 'MAExp@tv-basicstudies', name: 'المتوسط المتحرك الأسي (EMA)', shortName: 'EMA', description: 'متوسط الاتجاه الأسي السريع', category: 'الاتجاه' },
-  { id: 'MASimple@tv-basicstudies', name: 'المتوسط المتحرك البسيط (SMA)', shortName: 'SMA', description: 'متوسط الاتجاه الكلاسيكي العام', category: 'الاتجاه' },
-  { id: 'BB@tv-basicstudies', name: 'بولنجر باندز (Bollinger Bands)', shortName: 'BB', description: 'نطاقات الانحراف المعياري وتذبذب السعر', category: 'التقلب' },
-  { id: 'Stochastic@tv-basicstudies', name: 'ستوكاستيك (Stochastic)', shortName: 'STOCH', description: 'تحديد مستويات التشبع والارتدادات السريعة', category: 'الزخم' },
-];
-
-export const STORAGE_KEY_PERSISTENT_STUDIES = 'tv_persistent_studies';
-export const STORAGE_KEY_CHART_INTERVAL = 'tv_chart_interval';
-
 export interface CustomChartLine {
   id: string;
   price: number;
@@ -182,20 +177,49 @@ export interface CustomChartLine {
   style: 'solid' | 'dashed' | 'dotted';
   thickness: 1 | 2 | 3 | 4;
   label?: string;
-  notes?: string;
-  createdAt?: number;
-  createdPriceAtTime?: number;
-  textColor?: string;
-  textSize?: 'sm' | 'base' | 'lg';
   hasAlert?: boolean;
   alertDirection?: 'above' | 'below';
   alertFired?: boolean;
 }
 
+export interface PersistentIndicatorConfig {
+  volume: boolean;
+  sma20: boolean;
+  sma50: boolean;
+  ema20: boolean;
+  bollinger: boolean;
+  rsi: boolean;
+  macd: boolean;
+}
+
+const DEFAULT_INDICATORS: PersistentIndicatorConfig = {
+  volume: true,
+  sma20: true,
+  sma50: false,
+  ema20: true,
+  bollinger: false,
+  rsi: true,
+  macd: false,
+};
+
+export const STORAGE_KEY_PERSISTENT_INDICATORS = 'tv_persistent_studies_config';
+export const STORAGE_KEY_CHART_INTERVAL = 'tv_chart_interval';
+export const STORAGE_KEY_CHART_MODE = 'tv_chart_render_mode'; // 'native' | 'widget'
+
+const LINE_COLORS = [
+  { label: 'سماوي', value: '#06b6d4' },
+  { label: 'أخضر زمردي', value: '#10b981' },
+  { label: 'ذهبي', value: '#f59e0b' },
+  { label: 'أحمر وردي', value: '#ef4444' },
+  { label: 'بنفسجي', value: '#8b5cf6' },
+  { label: 'برتقالي', value: '#f97316' },
+  { label: 'أبيض', value: '#ffffff' },
+];
+
 interface TradingViewChartModalProps {
   isOpen: boolean;
-  symbol: string; // e.g. 'BTCUSDT' or 'BTC'
-  currencyName: string; // e.g. 'BTC'
+  symbol: string;
+  currencyName: string;
   description?: string;
   entryPrice?: string;
   breakEvenPrice?: string;
@@ -212,16 +236,6 @@ interface TradingViewChartModalProps {
   onNavigateToWatchlist?: () => void;
 }
 
-const LINE_COLORS = [
-  { label: 'سماوي', value: '#06b6d4', ring: 'ring-cyan-500' },
-  { label: 'أخضر زمردي', value: '#10b981', ring: 'ring-emerald-500' },
-  { label: 'ذهبي', value: '#f59e0b', ring: 'ring-amber-500' },
-  { label: 'أحمر وردي', value: '#ef4444', ring: 'ring-rose-500' },
-  { label: 'بنفسجي', value: '#8b5cf6', ring: 'ring-purple-500' },
-  { label: 'برتقالي', value: '#f97316', ring: 'ring-orange-500' },
-  { label: 'أبيض', value: '#ffffff', ring: 'ring-slate-300' },
-];
-
 function formatTimestamp(ts?: number): string {
   if (!ts) return 'الآن';
   try {
@@ -231,8 +245,7 @@ function formatTimestamp(ts?: number): string {
     const seconds = d.getSeconds().toString().padStart(2, '0');
     const day = d.getDate().toString().padStart(2, '0');
     const month = (d.getMonth() + 1).toString().padStart(2, '0');
-    const year = d.getFullYear();
-    return `${hours}:${minutes}:${seconds} ${day}/${month}/${year}`;
+    return `${hours}:${minutes}:${seconds} ${day}/${month}`;
   } catch {
     return 'الآن';
   }
@@ -272,20 +285,18 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
 
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isFloatingHudCollapsed, setIsFloatingHudCollapsed] = useState(false);
-  const [showInChartLevels, setShowInChartLevels] = useState(true);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
+  const [showIndicatorsModal, setShowIndicatorsModal] = useState(false);
   const [showTestPricesDrawer, setShowTestPricesDrawer] = useState(false);
-  const [showTvTip, setShowTvTip] = useState(false);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
 
-  // Dynamic Smart Symbol Resolution & Switching
+  // Symbol resolution
   const [userSelectedSymbol, setUserSelectedSymbol] = useState<string | null>(null);
   const [currentExchange, setCurrentExchange] = useState<string>('AUTO');
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [searchSymbolInput, setSearchSymbolInput] = useState('');
-  const [selectedExchangeFilter, setSelectedExchangeFilter] = useState<'AUTO' | 'BINANCE' | 'STONFI2' | 'BYBIT' | 'OKX'>('AUTO');
 
-  // React pattern: Reset custom selection when the underlying currency/symbol prop changes
+  // Reset custom selection when prop changes
   const [prevPropSymbol, setPrevPropSymbol] = useState(symbol);
   if (symbol !== prevPropSymbol) {
     setPrevPropSymbol(symbol);
@@ -294,80 +305,76 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   }
 
   const activeRawSymbol = userSelectedSymbol || symbol;
-
   const resolvedSymbolInfo = useMemo(() => {
     return parseSmartSymbol(activeRawSymbol, currentExchange);
   }, [activeRawSymbol, currentExchange]);
 
-  // Clean symbol and base asset derived from smart resolution
   const cleanSymbol = resolvedSymbolInfo.cleanPairName;
   const binanceSymbol = resolvedSymbolInfo.cleanPairName;
   const baseAsset = resolvedSymbolInfo.baseToken || currencyName.trim().toUpperCase() || 'CRYPTO';
 
-  // Persistent Technical Indicators across ALL charts and currencies
-  const [activeStudies, setActiveStudies] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return ['Volume@tv-basicstudies', 'RSI@tv-basicstudies'];
+  // Render Mode: 'native' (Lightweight Canvas) or 'widget' (TradingView iframe embed)
+  const [chartRenderMode, setChartRenderMode] = useState<'native' | 'widget'>(() => {
+    if (typeof window === 'undefined') return 'native';
     try {
-      const saved = localStorage.getItem(STORAGE_KEY_PERSISTENT_STUDIES);
+      return (localStorage.getItem(STORAGE_KEY_CHART_MODE) as 'native' | 'widget') || 'native';
+    } catch {
+      return 'native';
+    }
+  });
+
+  const handleToggleRenderMode = (mode: 'native' | 'widget') => {
+    setChartRenderMode(mode);
+    try {
+      localStorage.setItem(STORAGE_KEY_CHART_MODE, mode);
+    } catch {}
+  };
+
+  // Persistent Technical Indicators
+  const [indicatorsConfig, setIndicatorsConfig] = useState<PersistentIndicatorConfig>(() => {
+    if (typeof window === 'undefined') return DEFAULT_INDICATORS;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PERSISTENT_INDICATORS);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        return { ...DEFAULT_INDICATORS, ...JSON.parse(saved) };
       }
-    } catch {
-      // Ignore
-    }
-    return ['Volume@tv-basicstudies', 'RSI@tv-basicstudies'];
+    } catch {}
+    return DEFAULT_INDICATORS;
   });
 
-  const [showIndicatorsPanel, setShowIndicatorsPanel] = useState<boolean>(false);
-
-  // Persistent Timeframe Interval
-  const [chartInterval, setChartInterval] = useState<string>(() => {
-    if (typeof window === 'undefined') return '15';
-    try {
-      return localStorage.getItem(STORAGE_KEY_CHART_INTERVAL) || '15';
-    } catch {
-      return '15';
-    }
-  });
-
-  const handleToggleStudy = useCallback((studyId: string) => {
-    setActiveStudies((prev) => {
-      const next = prev.includes(studyId) ? prev.filter((id) => id !== studyId) : [...prev, studyId];
+  const toggleIndicator = (key: keyof PersistentIndicatorConfig) => {
+    setIndicatorsConfig((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
       try {
-        localStorage.setItem(STORAGE_KEY_PERSISTENT_STUDIES, JSON.stringify(next));
-      } catch {
-        // Ignore
-      }
+        localStorage.setItem(STORAGE_KEY_PERSISTENT_INDICATORS, JSON.stringify(next));
+      } catch {}
       return next;
     });
-  }, []);
+  };
 
-  const handleResetStudies = useCallback(() => {
-    const defaults = ['Volume@tv-basicstudies', 'RSI@tv-basicstudies'];
-    setActiveStudies(defaults);
+  // Timeframe interval (1m, 5m, 15m, 1h, 4h, 1d)
+  const [chartInterval, setChartInterval] = useState<string>(() => {
+    if (typeof window === 'undefined') return '15m';
     try {
-      localStorage.setItem(STORAGE_KEY_PERSISTENT_STUDIES, JSON.stringify(defaults));
+      return localStorage.getItem(STORAGE_KEY_CHART_INTERVAL) || '15m';
     } catch {
-      // Ignore
+      return '15m';
     }
-  }, []);
+  });
 
-  const handleSelectInterval = useCallback((newInterval: string) => {
-    setChartInterval(newInterval);
+  const handleSelectInterval = (val: string) => {
+    setChartInterval(val);
     try {
-      localStorage.setItem(STORAGE_KEY_CHART_INTERVAL, newInterval);
-    } catch {
-      // Ignore
-    }
-  }, []);
+      localStorage.setItem(STORAGE_KEY_CHART_INTERVAL, val);
+    } catch {}
+  };
 
   // Numeric Values
   const entryNum = entryPrice ? parseFloat(entryPrice) : NaN;
   const beNum = breakEvenPrice ? parseFloat(breakEvenPrice) : NaN;
   const currentPriceNum = livePrice ? parseFloat(livePrice) : NaN;
 
-  // Custom Drawn Lines State (Persisted in localStorage per symbol)
+  // Custom User Lines (persisted per symbol)
   const storageKeyCustomLines = `tv_custom_lines_${binanceSymbol}`;
   const [customLines, setCustomLines] = useState<CustomChartLine[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -382,21 +389,17 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   const persistCustomLines = useCallback((lines: CustomChartLine[]) => {
     try {
       localStorage.setItem(storageKeyCustomLines, JSON.stringify(lines));
-    } catch {
-      // Ignore
-    }
+    } catch {}
   }, [storageKeyCustomLines]);
 
-  // Exit Price Alert Target State
+  // Target Exit Price Alert
   const storageKeyExitAlert = `tv_exit_alert_${binanceSymbol}`;
   const [exitAlertPrice, setExitAlertPrice] = useState<string>(() => {
     if (typeof window === 'undefined') return '';
     try {
       const saved = localStorage.getItem(`tv_exit_alert_${binanceSymbol}`);
       if (saved) return JSON.parse(saved).price || '';
-    } catch {
-      // Ignore
-    }
+    } catch {}
     return '';
   });
 
@@ -405,31 +408,16 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     try {
       const saved = localStorage.getItem(`tv_exit_alert_${binanceSymbol}`);
       if (saved) return Boolean(JSON.parse(saved).active);
-    } catch {
-      // Ignore
-    }
-    return false;
-  });
-
-  const [exitAlertFired, setExitAlertFired] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      const saved = localStorage.getItem(`tv_exit_alert_${binanceSymbol}`);
-      if (saved) return Boolean(JSON.parse(saved).fired);
-    } catch {
-      // Ignore
-    }
+    } catch {}
     return false;
   });
 
   const [showExitAlertModal, setShowExitAlertModal] = useState<boolean>(false);
 
-  const persistExitAlert = useCallback((price: string, active: boolean, fired: boolean) => {
+  const persistExitAlert = useCallback((price: string, active: boolean, fired = false) => {
     try {
       localStorage.setItem(storageKeyExitAlert, JSON.stringify({ price, active, fired }));
-    } catch {
-      // Ignore
-    }
+    } catch {}
   }, [storageKeyExitAlert]);
 
   // Add/Edit Line Modal State
@@ -440,220 +428,35 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   const [lineEditorStyle, setLineEditorStyle] = useState<'solid' | 'dashed' | 'dotted'>('solid');
   const [lineEditorThickness, setLineEditorThickness] = useState<1 | 2 | 3 | 4>(2);
   const [lineEditorLabel, setLineEditorLabel] = useState<string>('');
-  const [lineEditorNotes, setLineEditorNotes] = useState<string>('');
-  const [lineEditorTextColor, setLineEditorTextColor] = useState<string>('#ffffff');
-  const [lineEditorTextSize, setLineEditorTextSize] = useState<'sm' | 'base' | 'lg'>('sm');
   const [lineEditorAlert, setLineEditorAlert] = useState<boolean>(false);
 
-  // Context Menu State for Right-Click on Chart
-  const [contextMenu, setContextMenu] = useState<{
-    visible: boolean;
-    x: number;
-    y: number;
-    estimatedPrice?: number;
-  }>({ visible: false, x: 0, y: 0 });
-
-  const [showLinesManager, setShowLinesManager] = useState<boolean>(false);
-  const [showLinesDock, setShowLinesDock] = useState<boolean>(false);
-  const chartOverlayRef = useRef<HTMLDivElement | null>(null);
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
-
-
-  // 1. DYNAMIC IN-CHART LEVEL LINES:
-  // Instead of static positions, Entry & Break-Even lines position dynamically relative to Live Price!
-  const levelLinePositions = useMemo(() => {
-    if (!entryNum || isNaN(entryNum)) return null;
-
-    // Center baseline for current live price
-    const centerTop = 50;
-
-    const fallbackCalcTop = (p: number) => {
-      if (entryNum && p > entryNum) return 40;
-      if (entryNum && p < entryNum) return 60;
-      return 50;
-    };
-
-    // If current price is not available yet, place comfortably
-    if (isNaN(currentPriceNum) || currentPriceNum <= 0) {
-      const exitNum = parseFloat(exitAlertPrice);
-      return { 
-        entryTop: 62, 
-        beTop: beNum && !isNaN(beNum) ? 42 : null, 
-        liveTop: 50,
-        exitTop: !isNaN(exitNum) && exitNum > 0 ? 30 : null,
-        calcTop: fallbackCalcTop
-      };
-    }
-
-    // Dynamic price scale: find maximum delta from live price
-    const deltas: number[] = [
-      Math.abs((entryNum - currentPriceNum) / currentPriceNum),
-    ];
-    if (beNum && !isNaN(beNum)) {
-      deltas.push(Math.abs((beNum - currentPriceNum) / currentPriceNum));
-    }
-    const exitNum = parseFloat(exitAlertPrice);
-    if (!isNaN(exitNum) && exitNum > 0) {
-      deltas.push(Math.abs((exitNum - currentPriceNum) / currentPriceNum));
-    }
-    customLines.forEach((l) => {
-      deltas.push(Math.abs((l.price - currentPriceNum) / currentPriceNum));
-    });
-
-    const maxSpread = Math.max(...deltas, 0.012); // At least 1.2% visible scale
-    const scaleFactor = 38 / maxSpread; // Maps max spread to +/- 38% from center (12% to 88% bounds)
-
-    // Higher price -> smaller top % (higher on chart)
-    const calcTop = (p: number) => {
-      const delta = (p - currentPriceNum) / currentPriceNum;
-      const rawTop = centerTop - delta * scaleFactor;
-      return Math.max(12, Math.min(88, rawTop));
-    };
-
-    return {
-      liveTop: centerTop,
-      entryTop: calcTop(entryNum),
-      beTop: beNum && !isNaN(beNum) ? calcTop(beNum) : null,
-      exitTop: !isNaN(exitNum) && exitNum > 0 ? calcTop(exitNum) : null,
-      calcTop,
-    };
-  }, [entryNum, beNum, currentPriceNum, exitAlertPrice, customLines]);
-
-  // Break-Even Spread Percentage from Entry Price
+  // Break-Even Spread Percentage
   const breakEvenSpreadPercent = useMemo(() => {
-    if (isNaN(entryNum) || entryNum <= 0 || isNaN(beNum) || beNum <= 0) {
-      return null;
-    }
+    if (isNaN(entryNum) || entryNum <= 0 || isNaN(beNum) || beNum <= 0) return null;
     return ((beNum - entryNum) / entryNum) * 100;
   }, [entryNum, beNum]);
 
   // Live Net P&L
   const pnlData = useMemo(() => {
-    if (isNaN(entryNum) || entryNum <= 0 || isNaN(currentPriceNum) || currentPriceNum <= 0) {
-      return null;
-    }
+    if (isNaN(entryNum) || entryNum <= 0 || isNaN(currentPriceNum) || currentPriceNum <= 0) return null;
     const diff = currentPriceNum - entryNum;
     const percent = (diff / entryNum) * 100;
     const qty = coinQuantity ? parseFloat(coinQuantity) : (tradeAmount ? parseFloat(tradeAmount) / entryNum : 100 / entryNum);
     const usdt = diff * qty;
-    return {
-      percent,
-      usdt,
-      isProfit: diff >= 0,
-    };
+    return { percent, usdt, isProfit: diff >= 0 };
   }, [entryNum, currentPriceNum, coinQuantity, tradeAmount]);
 
-  // Clean test prices list paired with timestamps
+  // Active Test Prices list
   const activeTestPrices = useMemo(() => {
     const list: Array<{ price: string; timestamp?: number; num: number }> = [];
     testPrices.forEach((tp, idx) => {
-      const trimmed = tp?.trim();
-      if (!trimmed) return;
-      const num = parseFloat(trimmed);
-      if (!isNaN(num) && num > 0) {
-        list.push({
-          price: trimmed,
-          timestamp: testPriceTimestamps[idx],
-          num,
-        });
+      const p = parseFloat(tp);
+      if (!isNaN(p) && p > 0) {
+        list.push({ price: tp, timestamp: testPriceTimestamps[idx], num: p });
       }
     });
     return list;
   }, [testPrices, testPriceTimestamps]);
-
-  const exitAlertFiredRef = useRef<boolean>(exitAlertFired);
-  useEffect(() => {
-    exitAlertFiredRef.current = exitAlertFired;
-  }, [exitAlertFired]);
-
-  const customFiredSetRef = useRef<Set<string>>(new Set());
-
-  // -------------------------------------------------------------
-  // REAL-TIME NOTIFICATION MONITOR FOR EXIT TARGET & CUSTOM LINES
-  // -------------------------------------------------------------
-  useEffect(() => {
-    if (isNaN(currentPriceNum) || currentPriceNum <= 0) return;
-
-    // Check Exit Target Alert
-    if (exitAlertActive && !exitAlertFiredRef.current && exitAlertPrice) {
-      const exitTarget = parseFloat(exitAlertPrice);
-      if (!isNaN(exitTarget) && exitTarget > 0) {
-        const isTriggered = 
-          (exitTarget >= entryNum && currentPriceNum >= exitTarget) ||
-          (exitTarget < entryNum && currentPriceNum <= exitTarget) ||
-          Math.abs(currentPriceNum - exitTarget) / exitTarget < 0.001;
-
-        if (isTriggered) {
-          exitAlertFiredRef.current = true;
-          // Verify with unified alert settings (defaults to OFF)
-          if (canTriggerAlert('targetExit', binanceSymbol)) {
-            recordAlertTriggered('targetExit', binanceSymbol);
-            soundAlert.playTone('celebration');
-
-            // Desktop / Mobile Push Notification API
-            systemNotification.sendNotification({
-              title: `🎯 هدف الخروج تحقق: ${binanceSymbol}!`,
-              body: `وصل سعر ${baseAsset} إلى هدف الخروج $${currentPriceNum} (المستهدف: $${exitTarget}).`,
-              tag: `exit-alert-${binanceSymbol}`,
-              icon: '/pwa-192x192.png',
-              badge: '/icon.svg',
-              renotify: true,
-              requireInteraction: true,
-            });
-          }
-
-          setTimeout(() => {
-            setExitAlertFired(true);
-            persistExitAlert(exitAlertPrice, true, true);
-          }, 0);
-        }
-      }
-    }
-
-    // Check Custom Lines Alerts
-    const newlyTriggeredIds: string[] = [];
-    customLines.forEach((line) => {
-      if (line.hasAlert && !line.alertFired && !customFiredSetRef.current.has(line.id)) {
-        const diffRatio = Math.abs(currentPriceNum - line.price) / line.price;
-        const crossed = 
-          (line.alertDirection === 'above' && currentPriceNum >= line.price) ||
-          (line.alertDirection === 'below' && currentPriceNum <= line.price) ||
-          diffRatio < 0.001;
-
-        if (crossed) {
-          customFiredSetRef.current.add(line.id);
-          newlyTriggeredIds.push(line.id);
-          // Verify with unified alert settings (defaults to OFF)
-          if (canTriggerAlert('chartLines', line.id)) {
-            recordAlertTriggered('chartLines', line.id);
-            soundAlert.playTone('bell');
-            systemNotification.sendNotification({
-              title: `🔔 تنبيه خط الشارت: ${binanceSymbol}!`,
-              body: `وصل السعر إلى خط المستوى ${line.label || ''} عند $${currentPriceNum}.`,
-              tag: `custom-line-${line.id}`,
-              icon: '/pwa-192x192.png',
-              renotify: true,
-            });
-          }
-        }
-      }
-    });
-
-    if (newlyTriggeredIds.length > 0) {
-      setTimeout(() => {
-        setCustomLines((prev) => {
-          const updated = prev.map((l) => newlyTriggeredIds.includes(l.id) ? { ...l, alertFired: true } : l);
-          persistCustomLines(updated);
-          return updated;
-        });
-      }, 0);
-    }
-
-    if (exitAlertActive || customLines.some((l) => l.hasAlert)) {
-      soundAlert.enableBackgroundKeepAlive();
-    }
-  }, [currentPriceNum, exitAlertActive, exitAlertPrice, entryNum, binanceSymbol, baseAsset, customLines, persistCustomLines, persistExitAlert]);
 
   // Copy helper
   const handleCopyPrice = (val: string, fieldId: string) => {
@@ -662,43 +465,446 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
       navigator.clipboard.writeText(val);
       setCopiedField(fieldId);
       setTimeout(() => setCopiedField(null), 1500);
-    } catch {
-      // Ignore
-    }
+    } catch {}
   };
 
-  // -------------------------------------------------------------
-  // CUSTOM DRAWING LINE ACTIONS
-  // -------------------------------------------------------------
-  const handleOpenAddLine = (suggestedPrice?: number) => {
-    setEditingLineId(null);
-    setLineEditorPrice(suggestedPrice ? suggestedPrice.toString() : livePrice || entryPrice || '');
-    setLineEditorColor('#06b6d4');
-    setLineEditorStyle('solid');
-    setLineEditorThickness(2);
-    setLineEditorLabel('');
-    setLineEditorNotes('');
-    setLineEditorTextColor('#ffffff');
-    setLineEditorTextSize('sm');
-    setLineEditorAlert(false);
-    setIsLineEditorOpen(true);
-    setContextMenu({ visible: false, x: 0, y: 0 });
-  };
+  // Ref to keep latest customLines accessible without re-subscribing chart click
+  const customLinesRef = useRef<CustomChartLine[]>(customLines);
+  customLinesRef.current = customLines;
+  const firedAlertsRef = useRef<Set<string>>(new Set());
 
-  const handleEditLine = (line: CustomChartLine) => {
+  const handleEditLine = useCallback((line: CustomChartLine) => {
     setEditingLineId(line.id);
     setLineEditorPrice(line.price.toString());
     setLineEditorColor(line.color);
     setLineEditorStyle(line.style);
     setLineEditorThickness(line.thickness);
     setLineEditorLabel(line.label || '');
-    setLineEditorNotes(line.notes || '');
-    setLineEditorTextColor(line.textColor || '#ffffff');
-    setLineEditorTextSize(line.textSize || 'sm');
     setLineEditorAlert(Boolean(line.hasAlert));
     setIsLineEditorOpen(true);
-  };
+  }, []);
 
+  const handleOpenAddLine = useCallback((suggestedPrice?: number) => {
+    setEditingLineId(null);
+    setLineEditorPrice(suggestedPrice ? suggestedPrice.toString() : livePrice || entryPrice || '');
+    setLineEditorColor('#06b6d4');
+    setLineEditorStyle('solid');
+    setLineEditorThickness(2);
+    setLineEditorLabel('');
+    setLineEditorAlert(false);
+    setIsLineEditorOpen(true);
+  }, [livePrice, entryPrice]);
+
+  // ---------------------------------------------------------------------------
+  // NATIVE LIGHTWEIGHT CHARTS INTEGRATION
+  // ---------------------------------------------------------------------------
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartInstanceRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const indicatorSeriesRefs = useRef<Map<string, ISeriesApi<'Line' | 'Histogram'>>>(new Map());
+  const priceLinesMapRef = useRef<Map<string, IPriceLine>>(new Map());
+
+  const [isLoadingCandles, setIsLoadingCandles] = useState<boolean>(true);
+  const [candlesData, setCandlesData] = useState<CandleData[]>([]);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Fetch Klines from API asynchronously
+  const fetchKlines = useCallback(async () => {
+    setIsLoadingCandles(true);
+    setFetchError(null);
+    try {
+      const res = await fetch(`/api/binance/klines?symbol=${cleanSymbol}&interval=${chartInterval}&limit=300`);
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.candles) && data.candles.length > 0) {
+        const mapped: CandleData[] = data.candles.map((c: { time: number; open: number; high: number; low: number; close: number; volume: number }) => ({
+          time: Number(c.time) as UTCTimestamp,
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close),
+          volume: Number(c.volume),
+        }));
+        setCandlesData(mapped);
+      } else {
+        setFetchError(data.error || 'تعذر جلب بيانات الشارت');
+      }
+    } catch (err: unknown) {
+      setFetchError(err instanceof Error ? err.message : 'خطأ في الاتصال');
+    } finally {
+      setIsLoadingCandles(false);
+    }
+  }, [cleanSymbol, chartInterval]);
+
+  useEffect(() => {
+    if (chartRenderMode === 'native' && isOpen) {
+      let active = true;
+      (async () => {
+        try {
+          const res = await fetch(`/api/binance/klines?symbol=${cleanSymbol}&interval=${chartInterval}&limit=300`);
+          const data = await res.json();
+          if (!active) return;
+          if (res.ok && Array.isArray(data.candles) && data.candles.length > 0) {
+            const mapped: CandleData[] = data.candles.map((c: { time: number; open: number; high: number; low: number; close: number; volume: number }) => ({
+              time: Number(c.time) as UTCTimestamp,
+              open: Number(c.open),
+              high: Number(c.high),
+              low: Number(c.low),
+              close: Number(c.close),
+              volume: Number(c.volume),
+            }));
+            setCandlesData(mapped);
+            setFetchError(null);
+          } else {
+            setFetchError(data.error || 'تعذر جلب بيانات الشارت');
+          }
+        } catch (err: unknown) {
+          if (!active) return;
+          setFetchError(err instanceof Error ? err.message : 'خطأ في الاتصال');
+        } finally {
+          if (active) {
+            setIsLoadingCandles(false);
+          }
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }
+  }, [cleanSymbol, chartInterval, chartRenderMode, isOpen]);
+
+  // Mount and manage Lightweight Chart
+  useEffect(() => {
+    if (chartRenderMode !== 'native' || !chartContainerRef.current) return;
+
+    const container = chartContainerRef.current;
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 500;
+
+    const chart = createChart(container, {
+      width,
+      height,
+      layout: {
+        background: { type: ColorType.Solid, color: isDark ? '#0b0f19' : '#ffffff' },
+        textColor: isDark ? '#94a3b8' : '#334155',
+      },
+      grid: {
+        vertLines: { color: isDark ? '#1e293b' : '#f1f5f9' },
+        horzLines: { color: isDark ? '#1e293b' : '#f1f5f9' },
+      },
+      timeScale: {
+        borderColor: isDark ? '#334155' : '#cbd5e1',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      rightPriceScale: {
+        borderColor: isDark ? '#334155' : '#cbd5e1',
+        autoScale: true,
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+      },
+    });
+
+    chartInstanceRef.current = chart;
+
+    // Candlestick Series
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#10b981',
+      downColor: '#ef4444',
+      borderUpColor: '#10b981',
+      borderDownColor: '#ef4444',
+      wickUpColor: '#10b981',
+      wickDownColor: '#ef4444',
+    });
+    candleSeriesRef.current = candleSeries;
+
+    // Volume Series
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceScaleId: '', // overlay
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.8,
+        bottom: 0,
+      },
+    });
+    volumeSeriesRef.current = volumeSeries;
+
+    // Resize observer
+    const resizeObserver = new ResizeObserver((entries) => {
+      if (entries.length > 0 && chartInstanceRef.current) {
+        const { width: w, height: h } = entries[0].contentRect;
+        chartInstanceRef.current.applyOptions({ width: w, height: h });
+      }
+    });
+    resizeObserver.observe(container);
+
+    // Chart click listener to pick price or edit line
+    chart.subscribeClick((param) => {
+      if (param.point && candleSeriesRef.current) {
+        const p = candleSeriesRef.current.coordinateToPrice(param.point.y);
+        if (p) {
+          const matched = customLinesRef.current.find((l) => Math.abs((l.price - p) / p) < 0.003);
+          if (matched) {
+            handleEditLine(matched);
+          }
+        }
+      }
+    });
+
+    const indicatorSeries = indicatorSeriesRefs.current;
+    const priceLines = priceLinesMapRef.current;
+
+    return () => {
+      resizeObserver.disconnect();
+      chart.remove();
+      chartInstanceRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      indicatorSeries.clear();
+      priceLines.clear();
+    };
+  }, [chartRenderMode, isDark, handleEditLine]);
+
+  // Update Candles and Volume data
+  useEffect(() => {
+    if (!candleSeriesRef.current || candlesData.length === 0) return;
+
+    candleSeriesRef.current.setData(candlesData);
+
+    if (volumeSeriesRef.current && indicatorsConfig.volume) {
+      volumeSeriesRef.current.setData(formatVolumeData(candlesData));
+    } else if (volumeSeriesRef.current) {
+      volumeSeriesRef.current.setData([]);
+    }
+
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.timeScale().fitContent();
+    }
+  }, [candlesData, indicatorsConfig.volume]);
+
+  // Live Price Tick into latest candle
+  useEffect(() => {
+    if (!candleSeriesRef.current || candlesData.length === 0 || !currentPriceNum || isNaN(currentPriceNum)) return;
+    const last = candlesData[candlesData.length - 1];
+    if (!last) return;
+
+    const updatedLast: CandleData = {
+      ...last,
+      high: Math.max(last.high, currentPriceNum),
+      low: Math.min(last.low, currentPriceNum),
+      close: currentPriceNum,
+    };
+
+    try {
+      candleSeriesRef.current.update(updatedLast);
+    } catch {}
+  }, [currentPriceNum, candlesData]);
+
+  // Render and sync Technical Indicators (SMA, EMA, Bollinger, RSI, MACD)
+  useEffect(() => {
+    const chart = chartInstanceRef.current;
+    if (!chart || candlesData.length === 0) return;
+
+    const activeMap = indicatorSeriesRefs.current;
+
+    // Helper: update or remove line series
+    const syncLineSeries = (key: string, enabled: boolean, points: LinePoint[], color: string, width = 2) => {
+      let series = activeMap.get(key) as ISeriesApi<'Line'> | undefined;
+      if (enabled) {
+        if (!series) {
+          series = chart.addSeries(LineSeries, {
+            color,
+            lineWidth: width as 1 | 2 | 3 | 4,
+            priceLineVisible: false,
+            lastValueVisible: true,
+          });
+          activeMap.set(key, series);
+        }
+        series.setData(points);
+      } else if (series) {
+        chart.removeSeries(series);
+        activeMap.delete(key);
+      }
+    };
+
+    // 1. SMA 20
+    syncLineSeries('sma20', indicatorsConfig.sma20, calculateSMA(candlesData, 20), '#3b82f6', 2);
+
+    // 2. SMA 50
+    syncLineSeries('sma50', indicatorsConfig.sma50, calculateSMA(candlesData, 50), '#f59e0b', 2);
+
+    // 3. EMA 20
+    syncLineSeries('ema20', indicatorsConfig.ema20, calculateEMA(candlesData, 20), '#a855f7', 2);
+
+    // 4. Bollinger Bands (Upper & Lower)
+    const bb = calculateBollingerBands(candlesData, 20, 2);
+    syncLineSeries('bb_upper', indicatorsConfig.bollinger, bb.upper, '#06b6d4', 1);
+    syncLineSeries('bb_lower', indicatorsConfig.bollinger, bb.lower, '#06b6d4', 1);
+
+    // 5. RSI 14 (plotted on separate price scale)
+    let rsiSeries = activeMap.get('rsi') as ISeriesApi<'Line'> | undefined;
+    if (indicatorsConfig.rsi) {
+      if (!rsiSeries) {
+        rsiSeries = chart.addSeries(LineSeries, {
+          color: '#ec4899',
+          lineWidth: 2,
+          priceScaleId: 'rsi_scale',
+          priceLineVisible: false,
+          lastValueVisible: true,
+        });
+        chart.priceScale('rsi_scale').applyOptions({
+          scaleMargins: { top: 0.75, bottom: 0.05 },
+        });
+        activeMap.set('rsi', rsiSeries);
+      }
+      rsiSeries.setData(calculateRSI(candlesData, 14));
+    } else if (rsiSeries) {
+      chart.removeSeries(rsiSeries);
+      activeMap.delete('rsi');
+    }
+  }, [candlesData, indicatorsConfig]);
+
+  // Synchronize Physical Price Lines (Entry, Break-Even, Exit Alert, Custom Lines)
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    const currentMap = priceLinesMapRef.current;
+
+    // Helper: upsert price line
+    const upsertLine = (
+      id: string,
+      price: number,
+      color: string,
+      style: LineStyle,
+      width: 1 | 2 | 3 | 4,
+      title: string
+    ) => {
+      if (isNaN(price) || price <= 0) {
+        const existing = currentMap.get(id);
+        if (existing) {
+          series.removePriceLine(existing);
+          currentMap.delete(id);
+        }
+        return;
+      }
+
+      const existing = currentMap.get(id);
+      if (existing) {
+        existing.applyOptions({
+          price,
+          color,
+          lineStyle: style,
+          lineWidth: width,
+          title,
+          axisLabelVisible: true,
+        });
+      } else {
+        const newLine = series.createPriceLine({
+          price,
+          color,
+          lineStyle: style,
+          lineWidth: width,
+          title,
+          axisLabelVisible: true,
+        });
+        currentMap.set(id, newLine);
+      }
+    };
+
+    // 1. Entry Price Line
+    if (entryNum && !isNaN(entryNum)) {
+      upsertLine('sys_entry', entryNum, '#06b6d4', LineStyle.Solid, 2, `دخول $${trimTrailingZeros(entryNum.toString())}`);
+    } else {
+      upsertLine('sys_entry', NaN, '', LineStyle.Solid, 1, '');
+    }
+
+    // 2. Break-Even Price Line
+    if (beNum && !isNaN(beNum)) {
+      const spread = breakEvenSpreadPercent !== null ? ` (+${breakEvenSpreadPercent.toFixed(2)}%)` : '';
+      upsertLine('sys_be', beNum, '#f59e0b', LineStyle.Dashed, 2, `تعادل $${trimTrailingZeros(beNum.toString())}${spread}`);
+    } else {
+      upsertLine('sys_be', NaN, '', LineStyle.Solid, 1, '');
+    }
+
+    // 3. Exit Alert Price Line
+    const exitNum = parseFloat(exitAlertPrice);
+    if (exitAlertActive && !isNaN(exitNum) && exitNum > 0) {
+      upsertLine('sys_exit', exitNum, '#ec4899', LineStyle.Dotted, 2, `هدف خروج $${trimTrailingZeros(exitNum.toString())}`);
+    } else {
+      upsertLine('sys_exit', NaN, '', LineStyle.Solid, 1, '');
+    }
+
+    // 4. Custom User Lines
+    const activeIds = new Set<string>(['sys_entry', 'sys_be', 'sys_exit']);
+    customLines.forEach((cl) => {
+      const lineStyle = cl.style === 'dashed' ? LineStyle.Dashed : cl.style === 'dotted' ? LineStyle.Dotted : LineStyle.Solid;
+      const label = cl.label ? `${cl.label} $${trimTrailingZeros(cl.price.toString())}` : `$${trimTrailingZeros(cl.price.toString())}`;
+      upsertLine(cl.id, cl.price, cl.color, lineStyle, cl.thickness, label);
+      activeIds.add(cl.id);
+    });
+
+    // Remove deleted lines
+    for (const [id, line] of Array.from(currentMap.entries())) {
+      if (!activeIds.has(id)) {
+        series.removePriceLine(line);
+        currentMap.delete(id);
+      }
+    }
+  }, [entryNum, beNum, breakEvenSpreadPercent, exitAlertActive, exitAlertPrice, customLines]);
+
+  // ---------------------------------------------------------------------------
+  // PRICE ALERTS MONITORING
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!currentPriceNum || isNaN(currentPriceNum) || currentPriceNum <= 0) return;
+
+    // Check Exit Target Alert
+    const exitNum = parseFloat(exitAlertPrice);
+    if (exitAlertActive && !isNaN(exitNum) && exitNum > 0) {
+      const shouldTrigger = entryNum && !isNaN(entryNum) && exitNum >= entryNum
+        ? currentPriceNum >= exitNum
+        : currentPriceNum <= exitNum;
+
+      if (shouldTrigger && canTriggerAlert('targetExit')) {
+        recordAlertTriggered('targetExit');
+        soundAlert.playTargetReachedAlert();
+        systemNotification.sendNotification({
+          title: `🎯 وصول هدف الخروج: ${binanceSymbol}`,
+          body: `وصل السعر إلى $${currentPriceNum} (الهدف: $${exitNum})`,
+          tag: `exit_${binanceSymbol}`,
+        });
+      }
+    }
+
+    // Check Custom Lines Alerts
+    customLines.forEach((cl) => {
+      if (!cl.hasAlert || cl.alertFired || firedAlertsRef.current.has(cl.id)) return;
+      const triggered = cl.alertDirection === 'above' ? currentPriceNum >= cl.price : currentPriceNum <= cl.price;
+      if (triggered && canTriggerAlert('chartLines')) {
+        firedAlertsRef.current.add(cl.id);
+        recordAlertTriggered('chartLines');
+        soundAlert.playTone('bell');
+        systemNotification.sendNotification({
+          title: `🔔 وصول السعر للمستوى: ${cl.label || binanceSymbol}`,
+          body: `السعر الآن $${currentPriceNum} تخطى المستوى $${cl.price}`,
+          tag: `line_${cl.id}`,
+        });
+
+        // Mark fired
+        const next = customLines.map((l) => (l.id === cl.id ? { ...l, alertFired: true } : l));
+        setCustomLines(next);
+        persistCustomLines(next);
+      }
+    });
+  }, [currentPriceNum, exitAlertActive, exitAlertPrice, entryNum, binanceSymbol, customLines, persistCustomLines]);
+
+  // ---------------------------------------------------------------------------
+  // LINE MANAGEMENT HANDLERS
+  // ---------------------------------------------------------------------------
   const handleSaveLine = () => {
     const pNum = parseFloat(lineEditorPrice);
     if (isNaN(pNum) || pNum <= 0) return;
@@ -711,9 +917,6 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
         style: lineEditorStyle,
         thickness: lineEditorThickness,
         label: lineEditorLabel.trim() || undefined,
-        notes: lineEditorNotes.trim() || undefined,
-        textColor: lineEditorTextColor,
-        textSize: lineEditorTextSize,
         hasAlert: lineEditorAlert,
         alertDirection: currentPriceNum > 0 ? (pNum >= currentPriceNum ? 'above' as const : 'below' as const) : undefined,
         alertFired: false,
@@ -728,11 +931,6 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
         style: lineEditorStyle,
         thickness: lineEditorThickness,
         label: lineEditorLabel.trim() || undefined,
-        notes: lineEditorNotes.trim() || undefined,
-        createdAt: Date.now(),
-        createdPriceAtTime: currentPriceNum > 0 ? currentPriceNum : pNum,
-        textColor: lineEditorTextColor,
-        textSize: lineEditorTextSize,
         hasAlert: lineEditorAlert,
         alertDirection: currentPriceNum > 0 ? (pNum >= currentPriceNum ? 'above' as const : 'below' as const) : undefined,
         alertFired: false,
@@ -748,314 +946,50 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     setIsLineEditorOpen(false);
   };
 
-  const handleToggleLineAlert = (id: string) => {
-    const next = customLines.map((l) => {
-      if (l.id === id) {
-        const nextAlert = !l.hasAlert;
-        if (nextAlert) {
-          systemNotification.requestPermission();
-        }
-        return {
-          ...l,
-          hasAlert: nextAlert,
-          alertFired: false,
-          alertDirection: currentPriceNum > 0 ? (l.price >= currentPriceNum ? 'above' as const : 'below' as const) : undefined,
-        };
-      }
-      return l;
-    });
-    setCustomLines(next);
-    persistCustomLines(next);
-  };
-
   const handleDeleteLine = (id: string) => {
     const next = customLines.filter((l) => l.id !== id);
     setCustomLines(next);
     persistCustomLines(next);
   };
 
-  const handleClearAllLines = () => {
-    setCustomLines([]);
-    persistCustomLines([]);
-    setShowLinesManager(false);
-  };
-
-  // -------------------------------------------------------------
-  // CONTEXT MENU & DELIBERATE LONG PRESS (ضغط مطول 750ms مع إلغاء عند الحركة)
-  // -------------------------------------------------------------
-  const openContextMenuAt = useCallback((clientX: number, clientY: number) => {
-    if (!chartOverlayRef.current) return;
-    const rect = chartOverlayRef.current.getBoundingClientRect();
-    const relY = Math.max(0, Math.min(rect.height, clientY - rect.top));
-    const percentFromTop = (relY / rect.height) * 100;
-
-    // Estimate price based on relative vertical height
-    let estPrice = currentPriceNum || entryNum || 100;
-    if (levelLinePositions) {
-      const deltaPercent = (50 - percentFromTop) / 38;
-      estPrice = currentPriceNum ? currentPriceNum * (1 + deltaPercent * 0.02) : estPrice;
-    }
-
-    // Clamp positions inside viewport
-    const menuWidth = 240;
-    const menuHeight = 270;
-    const clampedX = Math.max(16, Math.min(clientX - menuWidth / 2, window.innerWidth - menuWidth - 16));
-    const clampedY = Math.max(50, Math.min(clientY - 30, window.innerHeight - menuHeight - 20));
-
-    setContextMenu({
-      visible: true,
-      x: clampedX,
-      y: clampedY,
-      estimatedPrice: estPrice,
-    });
-  }, [currentPriceNum, entryNum, levelLinePositions]);
-
-  // Context menu on right click (Desktop)
-  const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    openContextMenuAt(e.clientX, e.clientY);
-  };
-
-  // Mobile Touch Long-Press Handlers (deliberate 750ms hold, cancels on movement > 10px)
-  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (e.touches.length !== 1) {
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-      }
-      touchStartPosRef.current = null;
-      return;
-    }
-    const touch = e.touches[0];
-    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
-
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    longPressTimerRef.current = setTimeout(() => {
-      try {
-        if (typeof window !== 'undefined' && 'navigator' in window && 'vibrate' in navigator) {
-          navigator.vibrate(40);
-        }
-      } catch {
-        // Ignore
-      }
-      openContextMenuAt(touch.clientX, touch.clientY);
-      longPressTimerRef.current = null;
-    }, 750); // Deliberate long press
-  };
-
-  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (!touchStartPosRef.current) return;
-    const touch = e.touches[0];
-    const dist = Math.hypot(touch.clientX - touchStartPosRef.current.x, touch.clientY - touchStartPosRef.current.y);
-    if (dist > 10) {
-      // Movement > 10px -> user is panning or scrolling, cancel long-press immediately
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-      }
+  // Adjust price coordinate nudges
+  const nudgeLinePrice = (deltaPercent: number) => {
+    const current = parseFloat(lineEditorPrice);
+    if (!isNaN(current) && current > 0) {
+      const next = current * (1 + deltaPercent / 100);
+      setLineEditorPrice(trimTrailingZeros(next.toString()));
     }
   };
 
-  const handleTouchEnd = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    touchStartPosRef.current = null;
-  };
-
-  // Desktop Mouse Long-Press Handlers
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return; // Left click only
-    touchStartPosRef.current = { x: e.clientX, y: e.clientY };
-
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    longPressTimerRef.current = setTimeout(() => {
-      openContextMenuAt(e.clientX, e.clientY);
-      longPressTimerRef.current = null;
-    }, 750);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!touchStartPosRef.current) return;
-    const dist = Math.hypot(e.clientX - touchStartPosRef.current.x, e.clientY - touchStartPosRef.current.y);
-    if (dist > 10) {
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-      }
-    }
-  };
-
-  const handleMouseUp = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    touchStartPosRef.current = null;
-  };
-
-  // Close context menu on outside click or escape
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && contextMenu.visible) {
-        setContextMenu((prev) => ({ ...prev, visible: false }));
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [contextMenu.visible]);
-
-
-  // -------------------------------------------------------------
-  // SAVE AS IMAGE (حفظ لقطة شاشة للشارت مع كافة الخطوط)
-  // -------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // SAVE AS IMAGE
+  // ---------------------------------------------------------------------------
   const handleSaveAsImage = async () => {
     setIsCapturingScreenshot(true);
     try {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const width = 1200;
-      const height = 750;
-      canvas.width = width;
-      canvas.height = height;
-
-      // Background
-      ctx.fillStyle = isDark ? '#090d16' : '#f8fafc';
-      ctx.fillRect(0, 0, width, height);
-
-      // Grid Lines
-      ctx.strokeStyle = isDark ? '#1e293b' : '#e2e8f0';
-      ctx.lineWidth = 1;
-      for (let x = 80; x < width; x += 100) {
-        ctx.beginPath();
-        ctx.moveTo(x, 70);
-        ctx.lineTo(x, height - 50);
-        ctx.stroke();
+      if (chartInstanceRef.current) {
+        const canvas = chartInstanceRef.current.takeScreenshot();
+        const dataUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.download = `${binanceSymbol}_Chart_${Date.now()}.png`;
+        link.href = dataUrl;
+        link.click();
       }
-      for (let y = 100; y < height - 50; y += 60) {
-        ctx.beginPath();
-        ctx.moveTo(40, y);
-        ctx.lineTo(width - 40, y);
-        ctx.stroke();
-      }
-
-      // Header Banner
-      ctx.fillStyle = isDark ? '#0f172a' : '#ffffff';
-      ctx.fillRect(0, 0, width, 70);
-      ctx.strokeStyle = isDark ? '#334155' : '#cbd5e1';
-      ctx.strokeRect(0, 0, width, 70);
-
-      // Title & Symbol
-      ctx.fillStyle = isDark ? '#f8fafc' : '#0f172a';
-      ctx.font = 'bold 24px sans-serif';
-      ctx.fillText(`${binanceSymbol}  (BINANCE)`, 50, 42);
-
-      // Price & Net P&L in Header
-      if (livePrice) {
-        ctx.fillStyle = '#10b981';
-        ctx.font = 'bold 22px monospace';
-        ctx.fillText(`$${trimTrailingZeros(livePrice)}`, 320, 42);
-      }
-
-      if (pnlData) {
-        ctx.fillStyle = pnlData.isProfit ? '#10b981' : '#f43f5e';
-        ctx.font = 'bold 18px monospace';
-        ctx.fillText(`صافي الربح: ${pnlData.isProfit ? '+' : ''}${pnlData.percent.toFixed(2)}% (${pnlData.usdt.toFixed(2)}$)`, 520, 42);
-      }
-
-      // Watermark / Date
-      ctx.fillStyle = isDark ? '#64748b' : '#94a3b8';
-      ctx.font = '14px sans-serif';
-      ctx.fillText(`«بوت مراقبة صعود العملات» • ${new Date().toLocaleString('ar-AE')}`, width - 380, 42);
-
-      // Draw Lines Helper
-      const drawHLine = (yPos: number, color: string, isDashed: boolean, lw: number, label: string, priceStr: string) => {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = lw;
-        ctx.setLineDash(isDashed ? [8, 6] : []);
-        ctx.beginPath();
-        ctx.moveTo(60, yPos);
-        ctx.lineTo(width - 160, yPos);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Price Badge on Right
-        ctx.fillStyle = color;
-        ctx.fillRect(width - 150, yPos - 14, 130, 28);
-        ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 12px monospace';
-        ctx.fillText(`${label} $${trimTrailingZeros(priceStr)}`, width - 145, yPos + 5);
-      };
-
-      // 1. Draw Live Market Price
-      if (currentPriceNum > 0) {
-        drawHLine(360, '#10b981', true, 2, 'سعر السوق', livePrice || '');
-      }
-
-      // 2. Draw Entry Line
-      if (entryPrice && levelLinePositions) {
-        const y = 80 + (levelLinePositions.entryTop / 100) * (height - 160);
-        drawHLine(y, '#06b6d4', false, 3, 'دخول', entryPrice);
-      }
-
-      // 3. Draw Break-Even Line
-      if (breakEvenPrice && levelLinePositions && levelLinePositions.beTop != null) {
-        const y = 80 + (levelLinePositions.beTop / 100) * (height - 160);
-        drawHLine(y, '#f59e0b', true, 3, 'تعادل', breakEvenPrice);
-      }
-
-      // 4. Draw Exit Target Line
-      if (exitAlertPrice && levelLinePositions && levelLinePositions.exitTop != null) {
-        const y = 80 + (levelLinePositions.exitTop / 100) * (height - 160);
-        drawHLine(y, '#ec4899', true, 3, 'هدف خروج', exitAlertPrice);
-      }
-
-      // 5. Draw Custom Lines
-      if (levelLinePositions) {
-        customLines.forEach((cl) => {
-          const topPct = levelLinePositions.calcTop(cl.price);
-          const y = 80 + (topPct / 100) * (height - 160);
-          drawHLine(y, cl.color, cl.style !== 'solid', cl.thickness + 1, cl.label || 'مستوى', cl.price.toString());
-        });
-      }
-
-      // Bottom Info Bar
-      ctx.fillStyle = isDark ? '#0f172a' : '#f1f5f9';
-      ctx.fillRect(0, height - 45, width, 45);
-      ctx.fillStyle = isDark ? '#94a3b8' : '#475569';
-      ctx.font = '13px sans-serif';
-      ctx.fillText(
-        `الدخول: ${entryPrice ? '$' + trimTrailingZeros(entryPrice) : '—'}  |  التعادل: ${breakEvenPrice ? '$' + trimTrailingZeros(breakEvenPrice) : '—'}  |  فارق التعادل: ${breakEvenSpreadPercent ? '+' + breakEvenSpreadPercent.toFixed(2) + '%' : '—'}`,
-        50,
-        height - 18
-      );
-
-      // Download PNG image
-      const dataUrl = canvas.toDataURL('image/png');
-      const link = document.createElement('a');
-      link.download = `${binanceSymbol}_Chart_Analysis_${Date.now()}.png`;
-      link.href = dataUrl;
-      link.click();
     } catch {
-      // Ignore
+      // Fallback
     } finally {
       setIsCapturingScreenshot(false);
+      setShowToolsMenu(false);
     }
   };
 
-  // Official isolated TradingView embed URL with smart dynamic exchange feed (Binance, STON.fi, Bybit, etc.) & persistent technical studies
+  // TradingView Iframe Widget fallback URL
   const iframeSrc = useMemo(() => {
     const toolbarColor = isDark ? '0f172a' : 'ffffff';
-    const studiesParam = activeStudies.length > 0 
-      ? `&studies=${encodeURIComponent(JSON.stringify(activeStudies))}` 
-      : '';
     return `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_advanced_chart&symbol=${encodeURIComponent(
       resolvedSymbolInfo.fullTradingViewSymbol
-    )}&interval=${chartInterval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=${toolbarColor}&theme=${chartTheme}&style=1&timezone=Etc%2FUTC&locale=ar_AE&allow_symbol_change=1&details=1&withdateranges=1${studiesParam}`;
-  }, [resolvedSymbolInfo.fullTradingViewSymbol, chartTheme, isDark, chartInterval, activeStudies]);
+    )}&interval=15&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=${toolbarColor}&theme=${chartTheme}&style=1&timezone=Etc%2FUTC&locale=ar_AE&allow_symbol_change=1&details=1&withdateranges=1`;
+  }, [resolvedSymbolInfo.fullTradingViewSymbol, chartTheme, isDark]);
 
   if (!isOpen) return null;
 
@@ -1074,308 +1008,137 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
         }`}
       >
         {/* ========================================================================= */}
-        {/* 1. TOP HEADER HUD (NORMAL MODE)                                           */}
+        {/* TOP HEADER HUD (STREAMLINED & MAXIMIZED FOR CHART VIEWPORT)              */}
         {/* ========================================================================= */}
-        {!isFullscreen && (
-          <header 
-            className={`flex flex-col border-b shrink-0 transition-colors ${
-              isDark ? 'bg-slate-900/95 border-slate-800 text-white' : 'bg-white/95 border-slate-200 text-slate-900'
-            }`}
-          >
-            {/* Row 1: Primary Controls, Price Stats & Actions */}
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-              {/* Right: Close & Back Buttons + Coin Identity */}
-              <div className="flex items-center gap-2">
-                {/* Prominent Close Button */}
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs transition bg-rose-600 hover:bg-rose-500 text-white cursor-pointer shadow-md"
-                  title="إغلاق الشارت والعودة للشاشة السابقة"
-                >
-                  <X className="w-4 h-4 stroke-[3]" />
-                  <span>إغلاق</span>
-                </button>
+        <header 
+          className={`flex flex-col border-b shrink-0 transition-colors ${
+            isDark ? 'bg-slate-900/95 border-slate-800 text-white' : 'bg-white/95 border-slate-200 text-slate-900'
+          }`}
+        >
+          {/* Row 1: Primary Controls, Price Stats & Actions */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+            {/* Right: Close & Coin Identity & Search */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs transition bg-rose-600 hover:bg-rose-500 text-white cursor-pointer shadow-md"
+                title="إغلاق الشارت"
+              >
+                <X className="w-4 h-4 stroke-[3]" />
+                <span>إغلاق</span>
+              </button>
 
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-bold text-xs transition border cursor-pointer ${
-                    isDark 
-                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700' 
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-                  }`}
-                  title="الرجوع"
-                >
-                  <ArrowRight className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">رجوع</span>
-                </button>
-
-                <div className="flex items-center gap-2 mr-1">
-                  <CoinAvatar symbol={baseAsset} size="md" />
-                  <div>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-mono font-black text-base tracking-tight" title={resolvedSymbolInfo.fullTradingViewSymbol}>
-                        {resolvedSymbolInfo.cleanPairName}
-                      </span>
-                      <span className={`text-[10px] font-black font-mono px-2 py-0.5 rounded-md border flex items-center gap-1 ${
-                        resolvedSymbolInfo.isDex
-                          ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 shadow-xs'
-                          : 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                      }`}>
-                        {resolvedSymbolInfo.isDex && <Globe className="w-3 h-3 text-blue-400" />}
-                        {resolvedSymbolInfo.exchangeBadge}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSearchSymbolInput(activeRawSymbol);
-                          setIsSearchModalOpen(true);
-                        }}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
-                        title="بحث شامل وتغيير الرمز أو المنصة (STON.fi / Binance / Bybit / OKX / على البلوكتشين)"
-                      >
-                        <Search className="w-3 h-3" />
-                        <span>بحث شامل / تغيير</span>
-                      </button>
+              <div className="flex items-center gap-1.5 mr-1">
+                <CoinAvatar symbol={baseAsset} size="sm" />
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-black text-sm tracking-tight">
+                      {resolvedSymbolInfo.cleanPairName}
+                    </span>
+                    <span className={`text-[9px] font-black font-mono px-1.5 py-0.2 rounded-md border flex items-center gap-0.5 ${
+                      resolvedSymbolInfo.isDex
+                        ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
+                        : 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                    }`}>
+                      {resolvedSymbolInfo.isDex && <Globe className="w-2.5 h-2.5" />}
+                      {resolvedSymbolInfo.exchangeBadge}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchSymbolInput(activeRawSymbol);
+                        setIsSearchModalOpen(true);
+                      }}
+                      className="p-1 rounded-lg text-amber-500 hover:bg-amber-500/20 border border-amber-500/30 transition cursor-pointer"
+                      title="بحث وتغيير الرمز / المنصة"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {livePrice && (
+                    <div className="flex items-center gap-1 text-xs font-mono font-black text-emerald-500">
+                      <span>${trimTrailingZeros(livePrice)}</span>
                     </div>
-                    {livePrice && (
-                      <div className="flex items-center gap-1.5 text-xs font-mono font-black text-emerald-600 dark:text-emerald-400">
-                        <span>${trimTrailingZeros(livePrice)}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Middle: Entry, Break-Even & Net P&L Badges */}
-              <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-1">
-                {/* Entry Price Badge */}
-                <div 
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs border ${
-                    isDark ? 'bg-slate-800/90 border-slate-700 text-white' : 'bg-slate-100 border-slate-300 text-slate-900'
-                  }`}
-                >
-                  <span className="w-2 h-2 rounded-full bg-cyan-500 shrink-0" />
-                  <span className="font-bold text-[11px] text-slate-500 dark:text-slate-400">الدخول:</span>
-                  <span className="font-mono font-black" dir="ltr">
-                    {entryPrice ? `$${trimTrailingZeros(entryPrice)}` : '—'}
-                  </span>
-                  {entryPrice && (
-                    <button
-                      type="button"
-                      onClick={() => handleCopyPrice(entryPrice, 'entry')}
-                      className="p-0.5 text-slate-400 hover:text-amber-500 transition cursor-pointer"
-                      title="نسخ سعر الدخول"
-                    >
-                      {copiedField === 'entry' ? (
-                        <Check className="w-3 h-3 text-emerald-500" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                    </button>
                   )}
                 </div>
-
-                {/* Break-Even Price Badge + Spread % */}
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
-                  <span className="font-bold text-amber-600 dark:text-amber-300 text-[11px]">التعادل:</span>
-                  <span className="font-mono font-black text-amber-600 dark:text-amber-400" dir="ltr">
-                    {breakEvenPrice ? `$${trimTrailingZeros(breakEvenPrice)}` : '—'}
-                  </span>
-
-                  {breakEvenSpreadPercent !== null && (
-                    <span 
-                      className="font-mono font-black text-[11px] px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40"
-                      title="النسبة المئوية للفارق السعري بين سعر الدخول وسعر التعادل لتغطية الرسوم"
-                    >
-                      +{breakEvenSpreadPercent.toFixed(2)}%
-                    </span>
-                  )}
-
-                  {breakEvenPrice && (
-                    <button
-                      type="button"
-                      onClick={() => handleCopyPrice(breakEvenPrice, 'be')}
-                      className="p-0.5 text-amber-600/80 dark:text-amber-400/80 hover:text-amber-500 transition cursor-pointer"
-                      title="نسخ سعر التعادل"
-                    >
-                      {copiedField === 'be' ? (
-                        <Check className="w-3 h-3 text-emerald-500" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                    </button>
-                  )}
-                </div>
-
-                {/* Net P&L Badge */}
-                {pnlData && (
-                  <div className={`flex items-center gap-1 px-2.5 py-1 rounded-xl font-mono text-xs font-black border ${
-                    pnlData.isProfit 
-                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400' 
-                      : 'bg-rose-500/15 border-rose-500/40 text-rose-600 dark:text-rose-400'
-                  }`}>
-                    {pnlData.isProfit ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                    <span>{pnlData.isProfit ? '+' : ''}{pnlData.percent.toFixed(2)}%</span>
-                    <span className="text-[10px] opacity-90 hidden sm:inline">
-                      ({pnlData.isProfit ? '+' : ''}{pnlData.usdt.toFixed(2)}$)
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Left: Line Actions, Indicators & Chart Tools */}
-              <div className="flex items-center gap-1.5">
-                {/* Persistent Technical Indicators Button */}
-                <button
-                  type="button"
-                  onClick={() => setShowIndicatorsPanel((prev) => !prev)}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-bold text-xs transition border cursor-pointer ${
-                    showIndicatorsPanel
-                      ? 'bg-purple-600 text-white border-purple-400 font-black shadow-sm ring-2 ring-purple-400/40'
-                      : activeStudies.length > 0
-                      ? 'bg-purple-500/15 border-purple-500/40 text-purple-600 dark:text-purple-300 hover:bg-purple-500/25'
-                      : isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'
-                  }`}
-                  title="المؤشرات الفنية المحفوظة دائماً لجميع العملات"
-                >
-                  <Activity className="w-3.5 h-3.5 text-purple-400" />
-                  <span className="text-[11px]">المؤشرات ({activeStudies.length})</span>
-                </button>
-
-                {/* Draw Custom Line Button */}
-                <button
-                  type="button"
-                  onClick={() => handleOpenAddLine()}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs transition cursor-pointer shadow-xs"
-                  title="رسم وإضافة خط أو مذكرة سعرية جديدة لهذه العملة"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span className="text-[11px]">رسم خط ومذكرة</span>
-                </button>
-
-                {/* Lines & Memos Dock Toggle Button */}
-                <button
-                  type="button"
-                  onClick={() => setShowLinesDock((prev) => !prev)}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-bold text-xs transition border cursor-pointer ${
-                    showLinesDock
-                      ? 'bg-cyan-500 text-slate-950 border-cyan-400 font-black shadow-sm'
-                      : customLines.length > 0
-                      ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/25'
-                      : isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'
-                  }`}
-                  title="عرض مكتبة الخطوط والمذكرات المحفوظة لهذه العملة"
-                >
-                  <Bookmark className="w-3.5 h-3.5" />
-                  <span className="text-[11px]">المذكرات ({customLines.length})</span>
-                </button>
-
-                {/* Exit Alert Target Button */}
-                <button
-                  type="button"
-                  onClick={() => setShowExitAlertModal(true)}
-                  className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                    exitAlertActive 
-                      ? 'bg-pink-600/20 border-pink-500/50 text-pink-600 dark:text-pink-300' 
-                      : isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'
-                  }`}
-                  title="تحديد سعر تنبيه للخروج وتفعيله مع Push Notification"
-                >
-                  <Target className="w-3.5 h-3.5 text-pink-500" />
-                  <span className="hidden md:inline text-[11px]">هدف الخروج</span>
-                </button>
-
-                {/* Save As Image Button */}
-                <button
-                  type="button"
-                  onClick={handleSaveAsImage}
-                  disabled={isCapturingScreenshot}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition cursor-pointer"
-                  title="حفظ لقطة شاشة للشارت مع كافة الخطوط كصورة على جهازك"
-                >
-                  <Camera className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="hidden lg:inline text-[11px]">حفظ صورة</span>
-                </button>
-
-                {/* In-Chart Lines Toggle */}
-                {(entryPrice || breakEvenPrice || customLines.length > 0) && (
-                  <button
-                    type="button"
-                    onClick={() => setShowInChartLevels((prev) => !prev)}
-                    className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                      showInChartLevels
-                        ? 'bg-blue-600/15 border-blue-500/40 text-blue-600 dark:text-blue-300'
-                        : isDark ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-100 border-slate-300 text-slate-600'
-                    }`}
-                    title={showInChartLevels ? 'إخفاء خطوط المستويات' : 'إظهار خطوط المستويات'}
-                  >
-                    {showInChartLevels ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                  </button>
-                )}
-
-                {/* Test Prices Drawer Toggle */}
-                {activeTestPrices.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowTestPricesDrawer((prev) => !prev)}
-                    className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                      showTestPricesDrawer 
-                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-600 dark:text-amber-300'
-                        : isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'
-                    }`}
-                    title="عرض قائمة أسعار الاختبار مع الطوابع الزمنية"
-                  >
-                    <Clock className="w-3.5 h-3.5 text-amber-500" />
-                    <span className="text-[11px]">({activeTestPrices.length})</span>
-                  </button>
-                )}
-
-                {/* Theme Toggle Button */}
-                <button
-                  type="button"
-                  onClick={toggleChartTheme}
-                  className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                    isDark 
-                      ? 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-slate-700' 
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-                  }`}
-                  title={isDark ? 'تبديل لخلفية بيضاء' : 'تبديل لخلفية سوداء'}
-                >
-                  {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-                </button>
-
-                {/* Fullscreen Button */}
-                <button
-                  type="button"
-                  onClick={() => setIsFullscreen(true)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition cursor-pointer shadow-sm"
-                  title="تفعيل وضع ملء الشاشة الكامل"
-                >
-                  <Maximize2 className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span className="hidden sm:inline">ملء الشاشة</span>
-                </button>
               </div>
             </div>
 
-            {/* Row 2: Direct Screen Integrations & Timeframe Picker */}
-            <div className={`flex items-center justify-between gap-2 px-3 py-1.5 border-t text-xs overflow-x-auto ${
-              isDark ? 'bg-slate-950/70 border-slate-800/80' : 'bg-slate-100/80 border-slate-200'
-            }`}>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="text-[11px] font-bold text-slate-400 shrink-0 ml-1">التنقل السريع ({baseAsset}):</span>
+            {/* Middle: Entry, Break-Even & P&L Badges */}
+            <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-0.5">
+              {/* Entry Price Badge */}
+              <div 
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs border ${
+                  isDark ? 'bg-slate-800/90 border-slate-700 text-white' : 'bg-slate-100 border-slate-300 text-slate-900'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 shrink-0" />
+                <span className="font-bold text-[10px] text-slate-400">الدخول:</span>
+                <span className="font-mono font-black text-[11px]" dir="ltr">
+                  {entryPrice ? `$${trimTrailingZeros(entryPrice)}` : '—'}
+                </span>
+                {entryPrice && (
+                  <button
+                    type="button"
+                    onClick={() => handleCopyPrice(entryPrice, 'entry')}
+                    className="p-0.5 text-slate-400 hover:text-amber-500 transition cursor-pointer"
+                    title="نسخ سعر الدخول"
+                  >
+                    {copiedField === 'entry' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                )}
+              </div>
 
+              {/* Break-Even Price Badge */}
+              <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                <span className="font-bold text-amber-500 text-[10px]">التعادل:</span>
+                <span className="font-mono font-black text-amber-500 text-[11px]" dir="ltr">
+                  {breakEvenPrice ? `$${trimTrailingZeros(breakEvenPrice)}` : '—'}
+                </span>
+                {breakEvenSpreadPercent !== null && (
+                  <span className="font-mono font-black text-[10px] px-1 rounded bg-amber-500/20 text-amber-400">
+                    +{breakEvenSpreadPercent.toFixed(1)}%
+                  </span>
+                )}
+                {breakEvenPrice && (
+                  <button
+                    type="button"
+                    onClick={() => handleCopyPrice(breakEvenPrice, 'be')}
+                    className="p-0.5 text-amber-400 hover:text-amber-300 transition cursor-pointer"
+                    title="نسخ سعر التعادل"
+                  >
+                    {copiedField === 'be' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                )}
+              </div>
+
+              {/* Net P&L Badge */}
+              {pnlData && (
+                <div className={`flex items-center gap-1 px-2 py-1 rounded-lg font-mono text-xs font-black border ${
+                  pnlData.isProfit 
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-500' 
+                    : 'bg-rose-500/15 border-rose-500/40 text-rose-500'
+                }`}>
+                  {pnlData.isProfit ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                  <span>{pnlData.isProfit ? '+' : ''}{pnlData.percent.toFixed(2)}%</span>
+                </div>
+              )}
+            </div>
+
+            {/* Left: Quick Actions & Compact Navigation Icons */}
+            <div className="flex items-center gap-1.5">
+              {/* Compact Screen Integration Buttons matching Bottom Navigation */}
+              <div className="flex items-center gap-1 bg-slate-800/50 p-1 rounded-xl border border-slate-700/60">
                 {onNavigateToCalculator && (
                   <button
                     type="button"
                     onClick={() => onNavigateToCalculator(baseAsset, entryPrice || livePrice)}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 dark:text-amber-300 border border-amber-500/40 font-bold transition cursor-pointer shrink-0 text-[11px]"
-                    title="فتح هذه العملة في حاسبة التعادل"
+                    className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/20 transition cursor-pointer"
+                    title="حاسبة التعادل"
                   >
-                    <Calculator className="w-3 h-3 text-amber-500" />
-                    <span>حاسبة التعادل</span>
+                    <Calculator className="w-4 h-4" />
                   </button>
                 )}
 
@@ -1383,11 +1146,10 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                   <button
                     type="button"
                     onClick={() => onNavigateToRangeMaster(baseAsset)}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-600 dark:text-cyan-300 border border-cyan-500/40 font-bold transition cursor-pointer shrink-0 text-[11px]"
-                    title="فتح هذه العملة في صائد القيعان"
+                    className="p-1.5 rounded-lg text-cyan-400 hover:bg-cyan-500/20 transition cursor-pointer"
+                    title="صائد القيعان"
                   >
-                    <Layers className="w-3 h-3 text-cyan-500" />
-                    <span>صائد القيعان</span>
+                    <Layers className="w-4 h-4" />
                   </button>
                 )}
 
@@ -1395,11 +1157,10 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                   <button
                     type="button"
                     onClick={() => onNavigateToTracker(baseAsset)}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-600 dark:text-purple-300 border border-purple-500/40 font-bold transition cursor-pointer shrink-0 text-[11px]"
-                    title="فتح هذه العملة في رصد الصعود"
+                    className="p-1.5 rounded-lg text-purple-400 hover:bg-purple-500/20 transition cursor-pointer"
+                    title="رصد الصعود"
                   >
-                    <TrendingUp className="w-3 h-3 text-purple-500" />
-                    <span>رصد الصعود</span>
+                    <TrendingUp className="w-4 h-4" />
                   </button>
                 )}
 
@@ -1407,684 +1168,265 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                   <button
                     type="button"
                     onClick={onNavigateToWatchlist}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-600 dark:text-blue-300 border border-blue-500/40 font-bold transition cursor-pointer shrink-0 text-[11px]"
-                    title="العودة لقائمة المراقبة"
+                    className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-500/20 transition cursor-pointer"
+                    title="قائمة المراقبة"
                   >
-                    <LayoutList className="w-3 h-3 text-blue-500" />
-                    <span>قائمة المراقبة</span>
+                    <LayoutList className="w-4 h-4" />
                   </button>
                 )}
               </div>
 
-              {/* Timeframe Interval Selector */}
-              <div className="flex items-center gap-1 shrink-0 mr-auto">
-                <span className="text-[10px] font-bold text-slate-400">الفريم:</span>
-                {[
-                  { id: '1', label: '1د' },
-                  { id: '5', label: '5د' },
-                  { id: '15', label: '15د' },
-                  { id: '60', label: '1س' },
-                  { id: '240', label: '4س' },
-                  { id: 'D', label: 'يومي' },
-                ].map((tf) => (
-                  <button
-                    key={tf.id}
-                    type="button"
-                    onClick={() => handleSelectInterval(tf.id)}
-                    className={`px-2 py-0.5 rounded-md font-mono text-[11px] font-bold transition cursor-pointer ${
-                      chartInterval === tf.id
-                        ? 'bg-amber-400 text-slate-950 font-black shadow-2xs'
-                        : isDark ? 'bg-slate-800 text-slate-300 hover:text-white' : 'bg-slate-200 text-slate-700 hover:text-slate-950'
-                    }`}
-                  >
-                    {tf.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </header>
-        )}
-
-        {/* ========================================================================= */}
-        {/* PERSISTENT TECHNICAL INDICATORS DRAWER (حفظ المؤشرات لجميع الشارتات)      */}
-        {/* ========================================================================= */}
-        {showIndicatorsPanel && (
-          <div 
-            className={`border-b p-3 shrink-0 transition-all ${
-              isDark ? 'bg-slate-950/95 border-purple-900/60' : 'bg-purple-50/90 border-purple-200'
-            }`}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-purple-500" />
-                <span className="font-black text-xs text-slate-900 dark:text-slate-100">
-                  المؤشرات الفنية المحفوظة دائماً (تُحفظ تلقائياً وتظهر على شارت أي عملة تفتحها):
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleResetStudies}
-                  className="text-[11px] text-slate-400 hover:text-purple-400 cursor-pointer font-bold underline"
-                >
-                  استعادة الافتراضي
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowIndicatorsPanel(false)}
-                  className="text-xs text-slate-400 hover:text-purple-500 cursor-pointer font-bold px-1.5 py-0.5 rounded hover:bg-slate-800"
-                >
-                  إغلاق ✕
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-              {POPULAR_INDICATORS.map((ind) => {
-                const isSelected = activeStudies.includes(ind.id);
-                return (
-                  <button
-                    key={ind.id}
-                    type="button"
-                    onClick={() => handleToggleStudy(ind.id)}
-                    className={`p-2 rounded-xl border text-right transition-all flex items-start justify-between cursor-pointer ${
-                      isSelected
-                        ? 'bg-purple-600/20 border-purple-500/70 text-purple-900 dark:text-purple-200 shadow-xs'
-                        : isDark
-                        ? 'bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
-                        : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:text-slate-900'
-                    }`}
-                  >
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-[9px] font-black px-1 rounded ${
-                          isSelected ? 'bg-purple-500 text-white' : 'bg-slate-700 text-slate-300'
-                        }`}>
-                          {ind.shortName}
-                        </span>
-                        <span className="font-bold text-xs">{ind.name}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                        {ind.description}
-                      </span>
-                    </div>
-
-                    <span className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 mt-0.5 border text-[10px] font-black ${
-                      isSelected ? 'bg-purple-500 border-purple-400 text-white' : 'border-slate-600'
-                    }`}>
-                      {isSelected ? '✓' : ''}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="mt-2 text-[10px] text-purple-600 dark:text-purple-300 flex items-center gap-1">
-              <span>💡</span>
-              <span>المؤشرات التي تختارها هنا تظل ثابتة ومحفوظة في المتصفح وتظهر تلقائياً على كل شارت لأي عملة ولا تختفي أبداً عند الخروج.</span>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* TEST PRICES DRAWER (أسعار الاختبار مع الطابع الزمني)                      */}
-        {/* ========================================================================= */}
-        {showTestPricesDrawer && activeTestPrices.length > 0 && (
-          <div 
-            className={`border-b px-3 py-2 shrink-0 transition-colors ${
-              isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-300'
-            }`}
-          >
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-amber-500" />
-                <span className="font-black text-xs">أسعار الاختبار المسجلة ({activeTestPrices.length}) مع الطابع الزمني:</span>
-              </div>
+              {/* Add Custom Price Line Button */}
               <button
                 type="button"
-                onClick={() => setShowTestPricesDrawer(false)}
-                className="text-xs text-slate-400 hover:text-amber-500 cursor-pointer"
+                onClick={() => handleOpenAddLine()}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition cursor-pointer shadow-xs"
+                title="إضافة خط سعري جديد على الشارت"
               >
-                إغلاق ✕
+                <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                <span className="hidden sm:inline">خط</span>
               </button>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-36 overflow-y-auto p-1">
-              {activeTestPrices.map((item, idx) => {
-                const diffFromEntry = !isNaN(entryNum) && entryNum > 0 ? ((item.num - entryNum) / entryNum) * 100 : null;
-                const isGain = diffFromEntry !== null && diffFromEntry >= 0;
-                return (
-                  <div 
-                    key={`tp-${idx}-${item.price}`}
-                    className={`p-2 rounded-xl border flex flex-col gap-1 transition-all ${
-                      isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slate-400">مستهدف #{idx + 1}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyPrice(item.price, `tp-${idx}`)}
-                        className="text-slate-400 hover:text-amber-500 cursor-pointer"
-                        title="نسخ السعر"
-                      >
-                        {copiedField === `tp-${idx}` ? (
-                          <Check className="w-3 h-3 text-emerald-500" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                      </button>
-                    </div>
-
-                    <div className="flex items-baseline justify-between">
-                      <span className="font-mono font-black text-sm text-slate-900 dark:text-white" dir="ltr">
-                        ${trimTrailingZeros(item.price)}
-                      </span>
-                      {diffFromEntry !== null && (
-                        <span className={`font-mono font-bold text-[11px] ${isGain ? 'text-emerald-500' : 'text-rose-500'}`}>
-                          {isGain ? '+' : ''}{diffFromEntry.toFixed(2)}%
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                      <Clock className="w-2.5 h-2.5 text-amber-500 shrink-0" />
-                      <span>{formatTimestamp(item.timestamp)}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* 2. MAIN TRADINGVIEW IFRAME + DYNAMIC LEVEL LINES + CUSTOM DRAWINGS        */}
-        {/* ========================================================================= */}
-        <div 
-          ref={chartOverlayRef}
-          onContextMenu={handleContextMenu}
-          className={`relative flex-1 w-full h-full min-h-[350px] ${isDark ? 'bg-slate-950' : 'bg-white'}`}
-        >
-          <iframe
-            key={`${resolvedSymbolInfo.fullTradingViewSymbol}-${chartTheme}-${chartInterval}-${activeStudies.join(',')}`}
-            src={iframeSrc}
-            className="w-full h-full border-0 block pointer-events-auto"
-            title={`TradingView Chart for ${resolvedSymbolInfo.fullTradingViewSymbol}`}
-            allow="fullscreen; clipboard-write"
-            loading="lazy"
-          />
-
-          {/* ======================================================================= */}
-          {/* DYNAMIC IN-CHART LEVEL LINES (تحرك مباشر وتلقائي مع السعر والبيانات)   */}
-          {/* ======================================================================= */}
-          {showInChartLevels && levelLinePositions && (
-            <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden" dir="rtl">
-              {/* 1. DYNAMIC ENTRY PRICE HORIZONTAL LINE */}
-              {entryPrice && (
-                <div 
-                  className="absolute left-0 right-0 flex items-center transition-all duration-300 pointer-events-auto"
-                  style={{ top: `${levelLinePositions.entryTop}%` }}
-                >
-                  <div className="flex-1 h-[2px] bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.9)] border-t border-cyan-300" />
-                  <div 
-                    className="flex items-center gap-1.5 px-2 py-0.5 ml-1 rounded-l-md font-mono font-black text-xs bg-cyan-600 text-white shadow-lg border border-cyan-400 select-none cursor-pointer hover:bg-cyan-500 transition"
-                    onClick={() => handleCopyPrice(entryPrice, 'entry-line')}
-                    title="سعر الدخول - انقر للنسخ"
-                  >
-                    <span className="font-sans text-[10px] font-bold">دخول</span>
-                    <span dir="ltr">${trimTrailingZeros(entryPrice)}</span>
-                    {copiedField === 'entry-line' && <Check className="w-3 h-3 text-white" />}
-                  </div>
-                </div>
-              )}
-
-              {/* 2. DYNAMIC BREAK-EVEN PRICE HORIZONTAL LINE */}
-              {breakEvenPrice && levelLinePositions.beTop !== null && (
-                <div 
-                  className="absolute left-0 right-0 flex items-center transition-all duration-300 pointer-events-auto"
-                  style={{ top: `${levelLinePositions.beTop}%` }}
-                >
-                  <div className="flex-1 h-0 border-t-2 border-dashed border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.9)]" />
-                  <div 
-                    className="flex items-center gap-1.5 px-2 py-0.5 ml-1 rounded-l-md font-mono font-black text-xs bg-amber-500 text-slate-950 shadow-lg border border-amber-300 select-none cursor-pointer hover:bg-amber-400 transition"
-                    onClick={() => handleCopyPrice(breakEvenPrice, 'be-line')}
-                    title="سعر التعادل - انقر للنسخ"
-                  >
-                    <span className="font-sans text-[10px] font-bold">تعادل</span>
-                    <span dir="ltr">${trimTrailingZeros(breakEvenPrice)}</span>
-                    {breakEvenSpreadPercent !== null && (
-                      <span className="text-[10px] font-mono font-black bg-slate-950/20 px-1 rounded-xs">
-                        +{breakEvenSpreadPercent.toFixed(1)}%
-                      </span>
-                    )}
-                    {copiedField === 'be-line' && <Check className="w-3 h-3 text-slate-950" />}
-                  </div>
-                </div>
-              )}
-
-              {/* 3. DYNAMIC EXIT TARGET ALERT LINE */}
-              {exitAlertPrice && levelLinePositions.exitTop !== null && (
-                <div 
-                  className="absolute left-0 right-0 flex items-center transition-all duration-300 pointer-events-auto"
-                  style={{ top: `${levelLinePositions.exitTop}%` }}
-                >
-                  <div className="flex-1 h-[2px] bg-pink-500 shadow-[0_0_12px_rgba(236,72,153,0.9)] border-t border-pink-400" />
-                  <div 
-                    className="flex items-center gap-1.5 px-2 py-0.5 ml-1 rounded-l-md font-mono font-black text-xs bg-pink-600 text-white shadow-lg border border-pink-300 select-none cursor-pointer"
-                    onClick={() => setShowExitAlertModal(true)}
-                    title="هدف الخروج - انقر للتعديل"
-                  >
-                    <Target className="w-3 h-3 text-white" />
-                    <span className="font-sans text-[10px] font-bold">هدف الخروج</span>
-                    <span dir="ltr">${trimTrailingZeros(exitAlertPrice)}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* 4. CUSTOM DRAWN LINES (الضغط مرة واحدة يفتح نافذة التخصيص والإعدادات والحذف فوراً) */}
-              {customLines.map((line) => {
-                const topPct = levelLinePositions.calcTop(line.price);
-                const isDashed = line.style === 'dashed';
-                const isDotted = line.style === 'dotted';
-                return (
-                  <div 
-                    key={line.id}
-                    className="absolute left-0 right-0 flex items-center transition-all duration-300 pointer-events-auto group cursor-pointer py-3 -my-3"
-                    style={{ top: `${topPct}%` }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditLine(line);
-                    }}
-                    title="انقر مرة واحدة لتخصيص إعدادات هذا الخط ولونه وحجمه ونصه أو حذفه"
-                  >
-                    {/* Line Stroke with Custom Style & Thickness */}
-                    <div 
-                      className="flex-1 transition-all group-hover:brightness-125"
-                      style={{
-                        borderTopWidth: `${line.thickness}px`,
-                        borderTopStyle: isDashed ? 'dashed' : isDotted ? 'dotted' : 'solid',
-                        borderTopColor: line.color,
-                        filter: `drop-shadow(0 0 6px ${line.color})`,
-                      }}
-                    />
-
-                    {/* Annotation Label over the line (if present) */}
-                    {line.label && (
-                      <div 
-                        className="absolute right-40 -top-5 px-2.5 py-0.5 rounded-md font-bold shadow-md select-none border border-black/20 group-hover:scale-105 transition"
-                        style={{
-                          backgroundColor: line.color,
-                          color: line.textColor || '#ffffff',
-                          fontSize: line.textSize === 'lg' ? '14px' : line.textSize === 'base' ? '12px' : '10px',
-                        }}
-                      >
-                        {line.label}
-                      </div>
-                    )}
-
-                    {/* Actions and Price Badge on the Right */}
-                    <div className="flex items-center gap-1 ml-1 select-none pointer-events-auto">
-                      {/* Always-visible Quick Delete Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteLine(line.id);
-                        }}
-                        className="p-1 px-1.5 rounded-md bg-rose-600 hover:bg-rose-500 text-white shadow-md cursor-pointer transition flex items-center gap-0.5"
-                        title="حذف هذا الخط من الشارت فوراً"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span className="text-[10px] font-bold">حذف</span>
-                      </button>
-
-                      {/* Quick Edit Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditLine(line);
-                        }}
-                        className="p-1 rounded-md bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-600 cursor-pointer transition"
-                        title="تعديل هذا الخط"
-                      >
-                        <Sliders className="w-3 h-3 text-cyan-400" />
-                      </button>
-
-                      {/* Right Price Badge */}
-                      <div 
-                        className="flex items-center gap-1 px-2 py-0.5 rounded-l-md font-mono font-black text-xs text-white shadow-lg border border-white/30 cursor-pointer hover:brightness-110 transition"
-                        style={{ backgroundColor: line.color }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditLine(line);
-                        }}
-                        title="انقر لتعديل هذا الخط"
-                      >
-                        {line.hasAlert && <BellRing className="w-3 h-3 text-amber-300" />}
-                        <span dir="ltr">${trimTrailingZeros(line.price.toString())}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* ======================================================================= */}
-          {/* CONTEXT MENU ON LONG-PRESS OR RIGHT-CLICK (مع زر X وإغلاق عند اللمس بالخارج) */}
-          {/* ======================================================================= */}
-          {contextMenu.visible && (
-            <>
-              {/* Invisible backdrop for instant dismissal by tapping anywhere outside */}
-              <div 
-                className="fixed inset-0 z-[85] bg-black/50 backdrop-blur-xs cursor-pointer animate-in fade-in duration-150"
-                onClick={() => setContextMenu({ visible: false, x: 0, y: 0 })}
-                onTouchStart={() => setContextMenu({ visible: false, x: 0, y: 0 })}
-              />
-
-              <div 
-                className={`fixed z-[90] w-64 p-3 rounded-2xl border shadow-2xl backdrop-blur-xl animate-in zoom-in-95 duration-150 ${
-                  isDark ? 'bg-slate-900/95 border-slate-700 text-white shadow-black/80' : 'bg-white/95 border-slate-300 text-slate-950 shadow-slate-400/50'
-                }`}
-                style={{ left: contextMenu.x, top: contextMenu.y }}
-                dir="rtl"
-                onClick={(e) => e.stopPropagation()}
+              {/* Technical Indicators Config Button */}
+              <button
+                type="button"
+                onClick={() => setShowIndicatorsModal(true)}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 border border-purple-500/40 font-bold text-xs transition cursor-pointer"
+                title="إعدادات وتخصيص المؤشرات الفنية المحفوظة"
               >
-                <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-200 dark:border-slate-800">
-                  <div className="flex items-center gap-1.5">
-                    <Sliders className="w-4 h-4 text-cyan-400" />
-                    <span className="text-xs font-black">خيارات الشارت السريعة</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {contextMenu.estimatedPrice && (
-                      <span className="font-mono font-black text-xs text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-md" dir="ltr">
-                        ${contextMenu.estimatedPrice.toFixed(2)}
-                      </span>
-                    )}
-                    {/* Clear 'X' Close Button */}
-                    <button
-                      type="button"
-                      onClick={() => setContextMenu({ visible: false, x: 0, y: 0 })}
-                      className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
-                      title="إغلاق القائمة"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
+                <Activity className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">المؤشرات</span>
+              </button>
 
-                <div className="space-y-1 text-xs">
-                  {/* 1. رسم وتخصيص خط أفقي هنا */}
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAddLine(contextMenu.estimatedPrice)}
-                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl bg-cyan-600/15 hover:bg-cyan-600 text-cyan-500 hover:text-white text-right transition cursor-pointer font-bold border border-cyan-500/30"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>رسم وتخصيص خط أفقي هنا</span>
-                  </button>
-
-                  {/* 2. تعيين هدف خروج وتنبيه */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (contextMenu.estimatedPrice) {
-                        setExitAlertPrice(contextMenu.estimatedPrice.toFixed(2));
-                      }
-                      setShowExitAlertModal(true);
-                      setContextMenu({ visible: false, x: 0, y: 0 });
-                    }}
-                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl bg-pink-600/15 hover:bg-pink-600 text-pink-500 hover:text-white text-right transition cursor-pointer font-bold border border-pink-500/30"
-                  >
-                    <Target className="w-4 h-4" />
-                    <span>تعيين هدف خروج وتنبيه</span>
-                  </button>
-
-                  {/* 3. إدارة الخطوط إذا كانت موجودة */}
-                  {customLines.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowLinesManager(true);
-                        setContextMenu({ visible: false, x: 0, y: 0 });
-                      }}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-800 text-slate-300 text-right transition cursor-pointer font-bold"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                      <span>إدارة وحذف الخطوط ({customLines.length})</span>
-                    </button>
-                  )}
-
-                  {/* 4. فتح في الحاسبة كسعر دخول */}
-                  {onNavigateToCalculator && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onNavigateToCalculator(baseAsset, contextMenu.estimatedPrice?.toFixed(2));
-                        onClose();
-                      }}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-amber-500/15 text-slate-300 hover:text-amber-400 text-right transition cursor-pointer font-bold"
-                    >
-                      <Calculator className="w-3.5 h-3.5 text-amber-500" />
-                      <span>شراء / فتح بالحاسبة</span>
-                    </button>
-                  )}
-
-                  {/* 5. فتح في لوحة السكالبينج */}
-                  {onNavigateToScalper && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onNavigateToScalper(baseAsset);
-                        onClose();
-                      }}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-emerald-500/15 text-slate-300 hover:text-emerald-400 text-right transition cursor-pointer font-bold"
-                    >
-                      <Zap className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>بيع / فتح بالسكالبينج</span>
-                    </button>
-                  )}
-
-                  {/* 6. إلغاء وإغلاق */}
-                  <button
-                    type="button"
-                    onClick={() => setContextMenu({ visible: false, x: 0, y: 0 })}
-                    className="w-full flex items-center justify-center gap-1 py-1.5 mt-1 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer font-bold text-[11px]"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    <span>إلغاء وإغلاق</span>
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* ======================================================================= */}
-          {/* FLOATING HUD CARD IN CORNER (FULLSCREEN MODE)                           */}
-          {/* ======================================================================= */}
-          {isFullscreen && (
-            <div 
-              className="absolute top-3 right-3 z-40 max-w-sm transition-all select-none"
-              dir="rtl"
-            >
-              {!isFloatingHudCollapsed ? (
-                /* Expanded Floating Card */
-                <div 
-                  className={`p-3 rounded-2xl border shadow-2xl backdrop-blur-xl transition-all ${
-                    isDark 
-                      ? 'bg-slate-900/90 border-slate-700/80 text-white shadow-[0_8px_30px_rgb(0,0,0,0.5)]' 
-                      : 'bg-white/95 border-slate-300 text-slate-950 shadow-[0_8px_30px_rgb(0,0,0,0.15)]'
-                  }`}
+              {/* Unified Tools Menu Button */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowToolsMenu((prev) => !prev)}
+                  className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition cursor-pointer"
+                  title="أدوات وخيارات الشارت الثانوية"
                 >
-                  {/* Top Bar of Floating HUD */}
-                  <div className="flex items-center justify-between gap-3 pb-2 mb-2 border-b border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center gap-2">
-                      <CoinAvatar symbol={baseAsset} size="sm" />
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono font-black text-sm tracking-tight">
-                            {resolvedSymbolInfo.cleanPairName}
-                          </span>
-                          <span className="text-[9px] font-black font-mono px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-500 border border-amber-500/30">
-                            {resolvedSymbolInfo.exchangeBadge}
-                          </span>
-                          {livePrice && (
-                            <span className="font-mono font-black text-xs text-emerald-600 dark:text-emerald-400" dir="ltr">
-                              ${trimTrailingZeros(livePrice)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                  <Settings2 className="w-3.5 h-3.5 text-amber-400" />
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                </button>
 
-                    {/* Controls: Add Line + Theme + Collapse + Exit Fullscreen */}
-                    <div className="flex items-center gap-1">
+                {showToolsMenu && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setShowToolsMenu(false)} 
+                    />
+                    <div className="absolute left-0 top-full mt-1.5 z-50 w-56 rounded-2xl bg-slate-900 border border-slate-700 p-2 shadow-2xl space-y-1 text-xs">
+                      {/* Toggle Render Mode */}
                       <button
                         type="button"
-                        onClick={() => handleOpenAddLine()}
-                        className="p-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition cursor-pointer"
-                        title="رسم خط أفقي"
+                        onClick={() => {
+                          handleToggleRenderMode(chartRenderMode === 'native' ? 'widget' : 'native');
+                          setShowToolsMenu(false);
+                        }}
+                        className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-800 text-right cursor-pointer"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <span className="text-slate-200 font-bold">نوع محرك الشارت:</span>
+                        <span className="text-cyan-400 font-bold">
+                          {chartRenderMode === 'native' ? 'خفيف أصلي ⚡' : 'TradingView كامل'}
+                        </span>
                       </button>
 
-                      {customLines.length > 0 && (
+                      {/* Exit Target Alert */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowExitAlertModal(true);
+                          setShowToolsMenu(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl hover:bg-slate-800 text-right text-pink-400 cursor-pointer font-bold"
+                      >
+                        <Target className="w-4 h-4" />
+                        <span>تحديد هدف خروج وتنبيه</span>
+                      </button>
+
+                      {/* Test Prices */}
+                      {activeTestPrices.length > 0 && (
                         <button
                           type="button"
-                          onClick={() => setShowLinesManager(true)}
-                          className="flex items-center gap-0.5 px-1.5 py-1 rounded-lg bg-rose-600/30 hover:bg-rose-600 border border-rose-500/50 text-rose-300 hover:text-white transition cursor-pointer"
-                          title={`إدارة أو حذف خطوط الشارت (${customLines.length})`}
+                          onClick={() => {
+                            setShowTestPricesDrawer((prev) => !prev);
+                            setShowToolsMenu(false);
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl hover:bg-slate-800 text-right text-amber-400 cursor-pointer font-bold"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span className="font-mono text-[10px] font-bold">{customLines.length}</span>
+                          <Clock className="w-4 h-4" />
+                          <span>أسعار الاختبار ({activeTestPrices.length})</span>
                         </button>
                       )}
 
+                      {/* Save Screenshot */}
                       <button
                         type="button"
                         onClick={handleSaveAsImage}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 transition cursor-pointer"
-                        title="حفظ كصورة"
+                        disabled={isCapturingScreenshot}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl hover:bg-slate-800 text-right text-slate-200 cursor-pointer font-bold"
                       >
-                        <Camera className="w-3.5 h-3.5" />
+                        <Camera className="w-4 h-4 text-emerald-400" />
+                        <span>حفظ لقطة شاشة كصورة</span>
                       </button>
 
+                      {/* Theme Toggle */}
                       <button
                         type="button"
                         onClick={toggleChartTheme}
-                        className={`p-1.5 rounded-lg border transition cursor-pointer ${
-                          isDark ? 'bg-slate-800 border-slate-700 text-amber-400' : 'bg-slate-100 border-slate-200 text-slate-800'
-                        }`}
-                        title={isDark ? 'خلفية بيضاء' : 'خلفية سوداء'}
+                        className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-800 text-right cursor-pointer"
                       >
-                        {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                        <span className="text-slate-300">مظهر الشارت:</span>
+                        <span className="text-amber-400 font-bold">{isDark ? 'داكن 🌙' : 'فاتح ☀️'}</span>
                       </button>
 
+                      {/* Fullscreen Toggle */}
                       <button
                         type="button"
-                        onClick={() => setIsFloatingHudCollapsed(true)}
-                        className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
-                        title="تصغير"
+                        onClick={() => {
+                          setIsFullscreen((prev) => !prev);
+                          setShowToolsMenu(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl hover:bg-slate-800 text-right text-cyan-400 cursor-pointer font-bold"
                       >
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setIsFullscreen(false)}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition cursor-pointer shadow-xs"
-                        title="خروج من ملء الشاشة"
-                      >
-                        <Minimize2 className="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span className="text-[11px]">إنهاء</span>
+                        <Maximize2 className="w-4 h-4" />
+                        <span>{isFullscreen ? 'إنهاء ملء الشاشة' : 'ملء الشاشة'}</span>
                       </button>
                     </div>
-                  </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
 
-                  {/* Body of Floating HUD */}
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className={`p-1.5 rounded-xl border ${isDark ? 'bg-slate-800/70 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-0.5">
-                        <span className="flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
-                          <span>الدخول:</span>
-                        </span>
-                      </div>
-                      <span className="font-mono font-black text-xs" dir="ltr">
-                        {entryPrice ? `$${trimTrailingZeros(entryPrice)}` : '—'}
-                      </span>
-                    </div>
-
-                    <div className="p-1.5 rounded-xl border bg-amber-500/10 border-amber-500/30">
-                      <div className="flex items-center justify-between text-[10px] font-bold text-amber-600 dark:text-amber-400 mb-0.5">
-                        <span className="flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                          <span>التعادل:</span>
-                        </span>
-                      </div>
-                      <span className="font-mono font-black text-xs text-amber-600 dark:text-amber-400" dir="ltr">
-                        {breakEvenPrice ? `$${trimTrailingZeros(breakEvenPrice)}` : '—'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {breakEvenSpreadPercent !== null && (
-                    <div className="mt-2 py-1 px-2 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-between text-[11px] font-bold text-amber-600 dark:text-amber-300">
-                      <span>فارق التعادل عن الدخول:</span>
-                      <span className="font-mono font-black" dir="ltr">
-                        +{breakEvenSpreadPercent.toFixed(2)}%
-                      </span>
-                    </div>
-                  )}
-
-                  {pnlData && (
-                    <div className={`mt-2 py-1 px-2.5 rounded-xl font-mono text-xs font-black flex items-center justify-between border ${
-                      pnlData.isProfit 
-                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400' 
-                        : 'bg-rose-500/15 border-rose-500/40 text-rose-600 dark:text-rose-400'
-                    }`}>
-                      <span className="font-sans text-[11px] font-bold">الربح الصافي حالياً:</span>
-                      <div className="flex items-center gap-1.5" dir="ltr">
-                        <span>{pnlData.isProfit ? '+' : ''}{pnlData.percent.toFixed(2)}%</span>
-                        <span className="text-[10px] opacity-90">({pnlData.isProfit ? '+' : ''}{pnlData.usdt.toFixed(2)}$)</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* Collapsed Floating Mini Pill */
-                <div 
-                  className={`flex items-center gap-2 p-1.5 px-3 rounded-full border shadow-xl backdrop-blur-xl transition-all cursor-pointer ${
-                    isDark 
-                      ? 'bg-slate-900/90 border-slate-700 text-white shadow-black/50' 
-                      : 'bg-white/95 border-slate-300 text-slate-950 shadow-slate-300/50'
+          {/* Row 2: Timeframe Interval Selector Only */}
+          <div className={`flex items-center justify-between px-3 py-1 border-t text-xs ${
+            isDark ? 'bg-slate-950/70 border-slate-800/80' : 'bg-slate-100/80 border-slate-200'
+          }`}>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] font-bold text-slate-400">الفريم الزمني:</span>
+              {[
+                { id: '1m', label: '1د' },
+                { id: '5m', label: '5د' },
+                { id: '15m', label: '15د' },
+                { id: '1h', label: '1س' },
+                { id: '4h', label: '4س' },
+                { id: '1d', label: 'يومي' },
+              ].map((tf) => (
+                <button
+                  key={tf.id}
+                  type="button"
+                  onClick={() => handleSelectInterval(tf.id)}
+                  className={`px-2 py-0.5 rounded-md font-mono text-[11px] font-bold transition cursor-pointer ${
+                    chartInterval === tf.id
+                      ? 'bg-amber-400 text-slate-950 font-black shadow-xs'
+                      : isDark ? 'bg-slate-800 text-slate-300 hover:text-white' : 'bg-slate-200 text-slate-700 hover:text-slate-950'
                   }`}
-                  onClick={() => setIsFloatingHudCollapsed(false)}
-                  title="انقر لتوسيع بطاقة بيانات الصفقة"
                 >
-                  <CoinAvatar symbol={baseAsset} size="xs" />
-                  <span className="font-mono font-black text-xs">{baseAsset}</span>
-                  {livePrice && (
-                    <span className="font-mono font-black text-xs text-emerald-600 dark:text-emerald-400" dir="ltr">
-                      ${trimTrailingZeros(livePrice)}
-                    </span>
-                  )}
-                  {breakEvenSpreadPercent !== null && (
-                    <span className="font-mono font-black text-[10px] text-amber-500">
-                      BE: +{breakEvenSpreadPercent.toFixed(1)}%
-                    </span>
-                  )}
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom Lines Quick Counter & Status */}
+            <div className="flex items-center gap-2">
+              {customLines.length > 0 && (
+                <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-bold">
+                  <span>خطوط مخصصة: {customLines.length}</span>
                 </div>
               )}
+              {chartRenderMode === 'native' && (
+                <button
+                  type="button"
+                  onClick={fetchKlines}
+                  className="p-1 text-slate-400 hover:text-white transition cursor-pointer"
+                  title="تحديث بيانات الشارت"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCandles ? 'animate-spin text-amber-400' : ''}`} />
+                </button>
+              )}
             </div>
+          </div>
+        </header>
+
+        {/* ========================================================================= */}
+        {/* TEST PRICES DRAWER (COLLAPSED BY DEFAULT)                                  */}
+        {/* ========================================================================= */}
+        {showTestPricesDrawer && activeTestPrices.length > 0 && (
+          <div className="border-b px-3 py-2 bg-slate-950 border-slate-800 shrink-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="font-bold text-xs text-amber-400">أسعار الاختبار المسجلة ({activeTestPrices.length}):</span>
+              <button
+                type="button"
+                onClick={() => setShowTestPricesDrawer(false)}
+                className="text-xs text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto py-1">
+              {activeTestPrices.map((item, idx) => (
+                <div key={idx} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs shrink-0">
+                  <span className="font-mono font-bold text-white">${trimTrailingZeros(item.price)}</span>
+                  <span className="text-[10px] text-slate-400">({formatTimestamp(item.timestamp)})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MAIN CHART VIEWPORT (MAXIMIZED CANVAS)                                    */}
+        {/* ========================================================================= */}
+        <main className="relative flex-1 w-full h-full min-h-[450px] overflow-hidden bg-slate-950">
+          {chartRenderMode === 'native' ? (
+            <>
+              {/* Native Lightweight Chart Canvas Container */}
+              <div 
+                ref={chartContainerRef} 
+                className="w-full h-full cursor-crosshair"
+              />
+
+              {/* Loading State Overlay */}
+              {isLoadingCandles && candlesData.length === 0 && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-xs z-20">
+                  <RefreshCw className="w-8 h-8 text-amber-400 animate-spin mb-2" />
+                  <span className="text-xs font-bold text-slate-300">جاري تحميل بيانات الشارت والشموع...</span>
+                </div>
+              )}
+
+              {/* Error State with fallback button */}
+              {fetchError && candlesData.length === 0 && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 z-20 p-4 text-center">
+                  <p className="text-sm font-bold text-rose-400 mb-2">{fetchError}</p>
+                  <p className="text-xs text-slate-400 mb-4">قد تكون هذه العملة مدرجة على منصة لامركزية (DEX) أو تتبع شبكة أخرى</p>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRenderMode('widget')}
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer"
+                  >
+                    التحويل لشارت TradingView المباشر
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            /* TradingView Official Web Embed Iframe */
+            <iframe
+              key={`${resolvedSymbolInfo.fullTradingViewSymbol}-${chartTheme}-${chartInterval}`}
+              src={iframeSrc}
+              className="w-full h-full border-0 block"
+              title={`TradingView Chart for ${resolvedSymbolInfo.fullTradingViewSymbol}`}
+              allow="fullscreen; clipboard-write"
+              loading="lazy"
+            />
           )}
-        </div>
+        </main>
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. MODAL: ADD / EDIT CUSTOM HORIZONTAL LINE                               */}
+      {/* MODAL: ADD / EDIT PHYSICAL PRICE LINE                                     */}
       {/* ========================================================================= */}
       {isLineEditorOpen && (
         <div 
@@ -2099,31 +1441,28 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <span className="font-black text-sm text-cyan-400 flex items-center gap-2">
                 <Sliders className="w-4 h-4" />
-                <span>{editingLineId ? 'تعديل الخط الأفقي' : 'رسم خط أفقي مخصص على الشارت'}</span>
+                <span>{editingLineId ? 'تعديل الخط السعري الأفقي' : 'رسم خط أفقي جديد على الشارت'}</span>
               </span>
               <button
                 type="button"
                 onClick={() => setIsLineEditorOpen(false)}
                 className="text-slate-400 hover:text-white cursor-pointer"
-                title="إغلاق النافذة"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Price Input */}
+            {/* Price Coordinate with Nudge Buttons */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold text-slate-300">
-                  سعر المستوى (USDT):
-                </label>
+                <label className="text-xs font-bold text-slate-300">سعر المستوى (USDT):</label>
                 {livePrice && (
                   <button
                     type="button"
                     onClick={() => setLineEditorPrice(trimTrailingZeros(livePrice))}
-                    className="text-[11px] font-mono font-bold text-emerald-400 hover:text-emerald-300 hover:underline cursor-pointer"
+                    className="text-[11px] font-mono font-bold text-emerald-400 hover:underline cursor-pointer"
                   >
-                    السعر اللحظي: ${trimTrailingZeros(livePrice)}
+                    السوق: ${trimTrailingZeros(livePrice)}
                   </button>
                 )}
               </div>
@@ -2136,13 +1475,30 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 placeholder={livePrice || '0.00'}
                 className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 font-mono font-bold text-sm text-white focus:outline-none focus:border-cyan-500"
               />
+
+              {/* Live Price Nudge Controls */}
+              <div className="flex items-center gap-1.5 mt-1.5">
+                {[
+                  { label: '-1%', delta: -1 },
+                  { label: '-0.2%', delta: -0.2 },
+                  { label: '+0.2%', delta: 0.2 },
+                  { label: '+1%', delta: 1 },
+                ].map((btn) => (
+                  <button
+                    key={btn.label}
+                    type="button"
+                    onClick={() => nudgeLinePrice(btn.delta)}
+                    className="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 font-mono text-[11px] font-bold text-slate-300 transition cursor-pointer"
+                  >
+                    {btn.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Color Palette */}
             <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1.5">
-                لون الخط:
-              </label>
+              <label className="text-xs font-bold text-slate-300 block mb-1.5">لون الخط:</label>
               <div className="flex items-center gap-2 flex-wrap">
                 {LINE_COLORS.map((c) => (
                   <button
@@ -2161,12 +1517,10 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               </div>
             </div>
 
-            {/* Line Style & Thickness */}
+            {/* Style & Thickness */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">
-                  نمط الخط:
-                </label>
+                <label className="text-xs font-bold text-slate-300 block mb-1">نمط الخط:</label>
                 <select
                   value={lineEditorStyle}
                   onChange={(e) => setLineEditorStyle(e.target.value as 'solid' | 'dashed' | 'dotted')}
@@ -2179,9 +1533,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">
-                  سماكة الخط:
-                </label>
+                <label className="text-xs font-bold text-slate-300 block mb-1">سماكة الخط:</label>
                 <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl">
                   {([1, 2, 3, 4] as const).map((th) => (
                     <button
@@ -2199,107 +1551,34 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               </div>
             </div>
 
-            {/* Annotation Label Text, Color & Size */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-300 block">
-                عنوان أو وصف الخط (اختياري):
-              </label>
+            {/* Label (displayed cleanly on the price axis without obscuring boxes) */}
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1">اسم / تصنيف المستوى:</label>
               <input
                 type="text"
                 value={lineEditorLabel}
                 onChange={(e) => setLineEditorLabel(e.target.value)}
-                placeholder="مثال: قاع صاعد / مقاومة يومية / هدف أول"
-                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:border-cyan-500"
-              />
-
-              {/* Text Color Selection */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 block mb-1">
-                  لون النص:
-                </label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {[
-                    { label: 'أبيض', value: '#ffffff' },
-                    { label: 'ذهبي', value: '#fbbf24' },
-                    { label: 'سماوي', value: '#22d3ee' },
-                    { label: 'أخضر', value: '#34d399' },
-                    { label: 'وردي', value: '#f43f5e' },
-                    { label: 'بنفسجي', value: '#a78bfa' },
-                    { label: 'برتقالي', value: '#fb923c' },
-                    { label: 'رمادي', value: '#94a3b8' },
-                  ].map((tc) => (
-                    <button
-                      key={tc.value}
-                      type="button"
-                      onClick={() => setLineEditorTextColor(tc.value)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer flex items-center gap-1 ${
-                        lineEditorTextColor === tc.value
-                          ? 'border-white bg-slate-700 ring-1 ring-white/50 text-white shadow-xs'
-                          : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:border-slate-500'
-                      }`}
-                    >
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: tc.value }} />
-                      <span>{tc.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Text Size Selection */}
-              <div className="flex items-center justify-between gap-3 text-xs pt-1">
-                <span className="text-slate-400 font-bold">حجم النص:</span>
-                <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl">
-                  {(['sm', 'base', 'lg'] as const).map((sz) => (
-                    <button
-                      key={sz}
-                      type="button"
-                      onClick={() => setLineEditorTextSize(sz)}
-                      className={`px-3 py-0.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                        lineEditorTextSize === sz ? 'bg-cyan-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {sz === 'sm' ? 'صغير' : sz === 'base' ? 'متوسط' : 'كبير'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Notes / Memos Textarea */}
-            <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1">
-                ملاحظات ومذكرة تفصيلية (الترند، الهبوط والصعود، سبب وضع المستوى):
-              </label>
-              <textarea
-                value={lineEditorNotes}
-                onChange={(e) => setLineEditorNotes(e.target.value)}
-                rows={2}
-                placeholder="اكتب هنا مذكرتك التحليلية لمراجعتها لاحقاً (مثال: ارتداد من خط دعم ترند صاعد بعد هبوط 3 أيام)..."
-                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-500 resize-none"
+                placeholder="مثال: قمة سابقة، دعم 15د، هدف بيع..."
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-500"
               />
             </div>
 
-            {/* Alert Option */}
-            <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700 space-y-1">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Bell className={`w-4 h-4 ${lineEditorAlert ? 'text-amber-400' : 'text-slate-400'}`} />
-                  <span className="text-xs font-bold">تفعيل تنبيه صوتي وإشعار عند وصول السعر</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={lineEditorAlert}
-                  onChange={(e) => setLineEditorAlert(e.target.checked)}
-                  className="w-4 h-4 accent-amber-500 cursor-pointer"
-                />
-              </div>
-              <p className="text-[10px] text-slate-400">
-                {lineEditorAlert ? '🔔 سيتم إطلاق صوت وإشعار فوري عند ملامسة السعر للخط.' : '🔕 خط تحليلي ومذكرة فقط بدون تنبيه إزعاج (يمكنك تفعيله متى شئت).'}
-              </p>
-            </div>
+            {/* Alert Toggle */}
+            <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/80 border border-slate-700 cursor-pointer">
+              <span className="flex items-center gap-2 text-xs font-bold">
+                <Bell className="w-4 h-4 text-amber-400" />
+                <span>تفعيل تنبيه صوتي وإشعار عند وصول السعر لهذا الخط</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={lineEditorAlert}
+                onChange={(e) => setLineEditorAlert(e.target.checked)}
+                className="w-4 h-4 accent-amber-500 cursor-pointer"
+              />
+            </label>
 
             {/* Actions */}
-            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
               {editingLineId ? (
                 <button
                   type="button"
@@ -2307,11 +1586,10 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                     handleDeleteLine(editingLineId);
                     setIsLineEditorOpen(false);
                   }}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/40 text-xs font-bold transition cursor-pointer"
-                  title="حذف هذا الخط من الشارت نهائياً"
+                  className="flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white text-xs font-bold transition cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>حذف هذا الخط</span>
+                  <span>حذف الخط</span>
                 </button>
               ) : <div />}
 
@@ -2319,16 +1597,16 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsLineEditorOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
                 >
                   إلغاء
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveLine}
-                  className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs transition cursor-pointer shadow-md"
+                  className="px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs transition cursor-pointer shadow-md"
                 >
-                  {editingLineId ? 'حفظ التعديلات' : 'حفظ الخط على الشارت'}
+                  حفظ المستوى
                 </button>
               </div>
             </div>
@@ -2337,7 +1615,85 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 4. MODAL: SET EXIT TARGET PRICE ALERT                                     */}
+      {/* MODAL: TECHNICAL INDICATORS SETTINGS                                      */}
+      {/* ========================================================================= */}
+      {showIndicatorsModal && (
+        <div 
+          className="fixed inset-0 z-[80] flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md cursor-pointer" 
+          dir="rtl"
+          onClick={() => setShowIndicatorsModal(false)}
+        >
+          <div 
+            className="w-full max-w-md p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="font-black text-sm text-purple-400 flex items-center gap-2">
+                <Activity className="w-4 h-4" />
+                <span>المؤشرات الفنية (محفوظة دائماً على كل الشارتات)</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowIndicatorsModal(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              أي مؤشر تقوم بتفعيله هنا يظل نشطاً ومحفوظاً على شارت أي عملة تفتحها ولا يختفي عند الخروج:
+            </p>
+
+            <div className="space-y-2">
+              {[
+                { key: 'volume', name: 'حجم التداول (Volume)', desc: 'أعمدة سيولة التداول في أسفل الشارت' },
+                { key: 'sma20', name: 'المتوسط المتحرك البسيط (SMA 20)', desc: 'خط الاتجاه الكلاسيكي 20 شمعة' },
+                { key: 'sma50', name: 'المتوسط المتحرك البسيط (SMA 50)', desc: 'خط الاتجاه المتوسط 50 شمعة' },
+                { key: 'ema20', name: 'المتوسط الأسي السريع (EMA 20)', desc: 'متوسط أسي متجاوب مع حركة السعر' },
+                { key: 'bollinger', name: 'بولنجر باندز (Bollinger Bands)', desc: 'نطاقات الانحراف المعياري والتقلب' },
+                { key: 'rsi', name: 'مؤشر القوة النسبية (RSI 14)', desc: 'مناطق ذروة الشراء والبيع والتشبع' },
+              ].map((ind) => {
+                const isChecked = indicatorsConfig[ind.key as keyof PersistentIndicatorConfig];
+                return (
+                  <label
+                    key={ind.key}
+                    className={`flex items-center justify-between p-3 rounded-2xl border transition cursor-pointer ${
+                      isChecked
+                        ? 'bg-purple-600/15 border-purple-500/50 text-white'
+                        : 'bg-slate-800/60 border-slate-700/60 text-slate-400'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-bold text-xs">{ind.name}</div>
+                      <div className="text-[11px] text-slate-400">{ind.desc}</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleIndicator(ind.key as keyof PersistentIndicatorConfig)}
+                      className="w-4 h-4 accent-purple-500 cursor-pointer"
+                    />
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowIndicatorsModal(false)}
+                className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition cursor-pointer"
+              >
+                تم وحفظ الإعدادات
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: EXIT TARGET ALERT CONFIG                                          */}
       {/* ========================================================================= */}
       {showExitAlertModal && (
         <div 
@@ -2352,27 +1708,19 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <span className="font-black text-sm text-pink-400 flex items-center gap-2">
                 <Target className="w-4 h-4" />
-                <span>تعيين سعر تنبيه للخروج مع إشعار فوري (Push Alert)</span>
+                <span>تحديد هدف الخروج وتنبيه الوصول</span>
               </span>
               <button
                 type="button"
                 onClick={() => setShowExitAlertModal(false)}
                 className="text-slate-400 hover:text-white cursor-pointer"
-                title="إغلاق النافذة"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed">
-              يقوم النظام برسم خط أفقي مشع يمثل هدف الخروج على الشارت، وإرسال إشعار فوري (Desktop / Mobile Push Notification) حتى لو كان التطبيق بالخلفية عند وصول السعر للهدف.
-            </p>
-
-            {/* Price Input */}
             <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1">
-                سعر الخروج المستهدف (USDT):
-              </label>
+              <label className="text-xs font-bold text-slate-300 block mb-1">سعر الهدف (USDT):</label>
               <input
                 type="text"
                 dir="ltr"
@@ -2384,279 +1732,42 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               />
             </div>
 
-            {/* Quick Percentage Presets */}
-            {entryNum > 0 && (
-              <div>
-                <span className="text-[11px] font-bold text-slate-400 block mb-1">
-                  أو اختر نسبة ربح مستهدفة سريعة فوق التعادل/الدخول:
-                </span>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {[0.5, 1.0, 1.5, 2.0, 3.0, 5.0].map((pct) => {
-                    const base = beNum && !isNaN(beNum) ? beNum : entryNum;
-                    const calculated = (base * (1 + pct / 100)).toFixed(4);
-                    return (
-                      <button
-                        key={pct}
-                        type="button"
-                        onClick={() => setExitAlertPrice(calculated)}
-                        className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-mono font-bold text-pink-300 border border-slate-700 transition cursor-pointer"
-                      >
-                        +{pct}% (${trimTrailingZeros(calculated)})
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-800/80 border border-slate-700 cursor-pointer">
+              <span className="flex items-center gap-2 text-xs font-bold">
+                <BellRing className="w-4 h-4 text-pink-400" />
+                <span>تفعيل التنبيه المباشر في الخلفية</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={exitAlertActive}
+                onChange={(e) => setExitAlertActive(e.target.checked)}
+                className="w-4 h-4 accent-pink-500 cursor-pointer"
+              />
+            </label>
 
-            {/* Actions */}
-            <div className="flex items-center justify-between pt-2">
-              {exitAlertActive ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setExitAlertActive(false);
-                    persistExitAlert(exitAlertPrice, false, false);
-                    setShowExitAlertModal(false);
-                  }}
-                  className="text-xs font-bold text-rose-400 hover:underline cursor-pointer"
-                >
-                  إلغاء التنبيه
-                </button>
-              ) : <div />}
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowExitAlertModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-                >
-                  إغلاق
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const p = parseFloat(exitAlertPrice);
-                    if (!isNaN(p) && p > 0) {
-                      setExitAlertActive(true);
-                      setExitAlertFired(false);
-                      persistExitAlert(exitAlertPrice, true, false);
-                      systemNotification.requestPermission();
-                    }
-                    setShowExitAlertModal(false);
-                  }}
-                  className="px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-black text-xs transition cursor-pointer shadow-md"
-                >
-                  حفظ وتفعيل التنبيه
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 5. MODAL: LINES & MEMOS LIBRARY (مكتبة خطوط ومذكرات العملة الشاملة)        */}
-      {/* ========================================================================= */}
-      {(showLinesManager || showLinesDock) && (
-        <div 
-          className="fixed inset-0 z-[80] flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md cursor-pointer"
-          dir="rtl"
-          onClick={() => {
-            setShowLinesManager(false);
-            setShowLinesDock(false);
-          }}
-        >
-          <div 
-            className="w-full max-w-lg p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default max-h-[85vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
-              <div className="flex items-center gap-2">
-                <Bookmark className="w-5 h-5 text-cyan-400" />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-black text-sm text-cyan-400">
-                      مكتبة خطوط ومذكرات {binanceSymbol}
-                    </span>
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
-                      {customLines.length} مستويات
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-400">
-                    محفوظة بشكل دائم لهذه العملة دون مسح عند التنقل
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowLinesManager(false);
-                    setShowLinesDock(false);
-                    handleOpenAddLine();
-                  }}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition cursor-pointer shadow-sm"
-                  title="إضافة خط ومذكرة جديدة"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>إضافة مستوى</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowLinesManager(false);
-                    setShowLinesDock(false);
-                  }}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-                  title="إغلاق النافذة"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* List */}
-            {customLines.length === 0 ? (
-              <div className="py-12 text-center text-slate-400 space-y-2">
-                <FileText className="w-10 h-10 mx-auto text-slate-600 stroke-[1.5]" />
-                <p className="text-xs font-bold">لا توجد خطوط أو مذكرات مرسومة حالياً لهذه العملة.</p>
-                <p className="text-[11px] text-slate-500">
-                  انقر على زر &quot;إضافة مستوى&quot; لرسم خط أفقي مع كتابة مذكراتك وتحليلك للترند وتحديد تنبيه اختياري.
-                </p>
-              </div>
-            ) : (
-              <div className="flex-1 overflow-y-auto space-y-2.5 py-1">
-                {customLines.map((line, idx) => {
-                  const diffFromLive = currentPriceNum > 0 ? ((line.price - currentPriceNum) / currentPriceNum) * 100 : null;
-                  const isAbove = diffFromLive !== null && diffFromLive >= 0;
-                  return (
-                    <div 
-                      key={line.id}
-                      className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80 hover:border-slate-600 transition space-y-2"
-                    >
-                      {/* Top Bar: Color, Price, Label, and Action Buttons */}
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-4 h-4 rounded-full border border-black/30 shrink-0 shadow-sm" 
-                            style={{ backgroundColor: line.color }} 
-                          />
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-black text-sm text-white" dir="ltr">
-                                ${trimTrailingZeros(line.price.toString())}
-                              </span>
-                              {diffFromLive !== null && (
-                                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-md ${
-                                  isAbove 
-                                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' 
-                                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                                }`}>
-                                  {isAbove ? '+' : ''}{diffFromLive.toFixed(2)}%
-                                </span>
-                              )}
-                              <span className="text-[10px] text-slate-500 font-bold">#{idx + 1}</span>
-                            </div>
-                            {line.label && (
-                              <div className="text-xs font-bold text-slate-200 mt-0.5">
-                                {line.label}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Quick Actions */}
-                        <div className="flex items-center gap-1.5">
-                          {/* Alert Toggle Button */}
-                          <button
-                            type="button"
-                            onClick={() => handleToggleLineAlert(line.id)}
-                            className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-bold transition border cursor-pointer ${
-                              line.hasAlert
-                                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
-                                : 'bg-slate-700/50 border-slate-600 text-slate-400 hover:text-white'
-                            }`}
-                            title={line.hasAlert ? 'انقر لإلغاء التنبيه الصوتي لهذا الخط' : 'انقر لتفعيل تنبيه صوتي عند وصول السعر'}
-                          >
-                            {line.hasAlert ? <BellRing className="w-3.5 h-3.5 text-amber-400" /> : <Bell className="w-3.5 h-3.5" />}
-                            <span>{line.hasAlert ? 'تنبيه مفعّل' : 'بدون تنبيه'}</span>
-                          </button>
-
-                          {/* Edit Button */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowLinesManager(false);
-                              setShowLinesDock(false);
-                              handleEditLine(line);
-                            }}
-                            className="p-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 transition cursor-pointer"
-                            title="تعديل هذا الخط"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-
-                          {/* Delete Button */}
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteLine(line.id)}
-                            className="p-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 transition cursor-pointer"
-                            title="حذف هذا الخط"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Notes / Memo Body (if written) */}
-                      {line.notes && (
-                        <div className="p-2 rounded-xl bg-slate-900/60 border border-slate-700/50 text-xs text-slate-300 leading-relaxed font-sans">
-                          <span className="text-[10px] font-bold text-slate-500 block mb-0.5">مذكرة التحليل:</span>
-                          {line.notes}
-                        </div>
-                      )}
-
-                      {/* Line Meta (Time & Price when created) */}
-                      <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1 border-t border-slate-700/40">
-                        <div className="flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-amber-500 shrink-0" />
-                          <span>سجلت: {formatTimestamp(line.createdAt)}</span>
-                        </div>
-                        {line.createdPriceAtTime && (
-                          <span>السعر حينها: ${trimTrailingZeros(line.createdPriceAtTime.toString())}</span>
-                        )}
-                        <span className="text-slate-500 capitalize">
-                          {line.style === 'solid' ? 'متصل' : line.style === 'dashed' ? 'متقطع' : 'منقط'} ({line.thickness}px)
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="pt-2 border-t border-slate-800 shrink-0 flex items-center justify-between gap-2">
-              {customLines.length > 0 ? (
-                <button
-                  type="button"
-                  onClick={handleClearAllLines}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/50 text-xs font-black transition cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>حذف كافة الخطوط ({customLines.length})</span>
-                </button>
-              ) : <div />}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setExitAlertActive(false);
+                  persistExitAlert('', false);
+                  setShowExitAlertModal(false);
+                }}
+                className="text-rose-400 hover:underline text-xs font-bold cursor-pointer"
+              >
+                تعطيل الهدف
+              </button>
 
               <button
                 type="button"
-                onClick={() => setShowLinesManager(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer"
+                onClick={() => {
+                  persistExitAlert(exitAlertPrice, exitAlertActive);
+                  if (exitAlertActive) systemNotification.requestPermission();
+                  setShowExitAlertModal(false);
+                }}
+                className="px-5 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-black text-xs transition cursor-pointer"
               >
-                إغلاق
+                حفظ الهدف
               </button>
             </div>
           </div>
@@ -2664,219 +1775,60 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 5. MODAL: UNIVERSAL SEARCH & EXCHANGE SWITCHER (DEX & CEX)                 */}
+      {/* MODAL: SEARCH & SWITCH SYMBOL                                             */}
       {/* ========================================================================= */}
       {isSearchModalOpen && (
         <div 
-          className="fixed inset-0 z-[85] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md cursor-pointer"
+          className="fixed inset-0 z-[80] flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md cursor-pointer" 
           dir="rtl"
           onClick={() => setIsSearchModalOpen(false)}
         >
           <div 
-            className="w-full max-w-lg p-5 sm:p-6 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default max-h-[90vh] overflow-y-auto"
+            className="w-full max-w-md p-5 rounded-3xl bg-slate-900 border border-slate-700 text-white shadow-2xl space-y-4 cursor-default"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-                  <Search className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-white">
-                    البحث الشامل ومحرك الشارت الذكي (DEX & CEX)
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    عرض شارت أي عملة على البلوكتشين (STON.fi / TON) أو المنصات المركزية
-                  </p>
-                </div>
-              </div>
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="font-black text-sm text-amber-400 flex items-center gap-2">
+                <Search className="w-4 h-4" />
+                <span>البحث عن عملة أو زوج في المنصات والبلوكتشين</span>
+              </span>
               <button
                 type="button"
                 onClick={() => setIsSearchModalOpen(false)}
-                className="p-1 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-                title="إغلاق النافذة"
+                className="text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Exchange Filter Selector */}
-            <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1.5">
-                تحديد المنصة / الشبكة:
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                {[
-                  { id: 'AUTO', label: 'تلقائي ذكي (موصى به)', badge: 'ذكي' },
-                  { id: 'STONFI2', label: 'STON.fi (TON DEX)', badge: 'TON' },
-                  { id: 'BINANCE', label: 'Binance (فوري)', badge: 'CEX' },
-                  { id: 'BYBIT', label: 'Bybit', badge: 'CEX' },
-                  { id: 'OKX', label: 'OKX', badge: 'CEX' },
-                ].map((item) => {
-                  const isSel = selectedExchangeFilter === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setSelectedExchangeFilter(item.id as any)}
-                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between border cursor-pointer ${
-                        isSel
-                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
-                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
-                      }`}
-                    >
-                      <span>{item.label}</span>
-                      <span className="text-[9px] px-1 py-0.2 rounded bg-slate-700/80 text-slate-300 font-mono">
-                        {item.badge}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <input
+              type="text"
+              value={searchSymbolInput}
+              onChange={(e) => setSearchSymbolInput(e.target.value)}
+              placeholder="مثال: BTCUSDT أو ATF أو STONFI2:ATFUSDT_EQAY5H"
+              className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 font-mono text-sm text-white focus:outline-none focus:border-amber-500"
+            />
 
-            {/* Search Input Bar */}
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                const clean = searchSymbolInput.trim();
-                if (clean) {
-                  setUserSelectedSymbol(clean);
-                  setCurrentExchange(selectedExchangeFilter);
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-800 justify-end">
+              <button
+                type="button"
+                onClick={() => setIsSearchModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (searchSymbolInput.trim()) {
+                    setUserSelectedSymbol(searchSymbolInput.trim().toUpperCase());
+                  }
                   setIsSearchModalOpen(false);
-                }
-              }}
-              className="space-y-2"
-            >
-              <label className="text-xs font-bold text-slate-300 block">
-                اكتب رمز العملة أو عنوان العقد / Pool:
-              </label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    dir="ltr"
-                    value={searchSymbolInput}
-                    onChange={(e) => setSearchSymbolInput(e.target.value)}
-                    placeholder="مثال: ATF أو STONFI2:ATFUSDT_EQAY5H أو BTCUSDT"
-                    className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 font-mono font-bold text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                    autoFocus
-                  />
-                  {searchSymbolInput && (
-                    <button
-                      type="button"
-                      onClick={() => setSearchSymbolInput('')}
-                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-                <button
-                  type="submit"
-                  disabled={!searchSymbolInput.trim()}
-                  className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                >
-                  عرض الشارت
-                </button>
-              </div>
-            </form>
-
-            {/* Quick Suggestions & TON Blockchain Tokens */}
-            <div className="space-y-3 pt-2">
-              <div>
-                <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1.5">
-                  <Globe className="w-3.5 h-3.5 text-blue-400" />
-                  <span>عملات البلوكتشين و DEX (STON.fi / TON):</span>
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {[
-                    {
-                      sym: 'STONFI2:ATFUSDT_EQAY5H',
-                      name: 'ATF / USDT',
-                      network: 'STON.fi (TON)',
-                      desc: 'عملة محفظة باينانس اللامركزية على TON',
-                    },
-                    {
-                      sym: 'TONUSDT',
-                      name: 'TON / USDT',
-                      network: 'Toncoin',
-                      desc: 'عملة شبكة التلغرام الأساسية',
-                    },
-                    {
-                      sym: 'NOTUSDT',
-                      name: 'NOT / USDT',
-                      network: 'Notcoin (TON)',
-                      desc: 'رمز Notcoin على شبكة TON',
-                    },
-                    {
-                      sym: 'DOGSUSDT',
-                      name: 'DOGS / USDT',
-                      network: 'Dogs (TON)',
-                      desc: 'رمز Dogs على شبكة TON',
-                    },
-                  ].map((item) => (
-                    <button
-                      key={item.sym}
-                      type="button"
-                      onClick={() => {
-                        setUserSelectedSymbol(item.sym);
-                        setCurrentExchange('AUTO');
-                        setIsSearchModalOpen(false);
-                      }}
-                      className="flex items-center justify-between p-2.5 rounded-xl bg-blue-950/30 hover:bg-blue-900/40 border border-blue-800/40 hover:border-blue-700 text-right transition cursor-pointer group"
-                    >
-                      <div>
-                        <div className="font-mono font-black text-xs text-blue-300 group-hover:text-blue-200">
-                          {item.name}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {item.desc}
-                        </div>
-                      </div>
-                      <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                        {item.network}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mb-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>أشهر العملات في منصة باينانس (Spot):</span>
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'PEPEUSDT', 'SUIUSDT', 'NEARUSDT', 'AVAXUSDT'].map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => {
-                        setUserSelectedSymbol(s);
-                        setCurrentExchange('BINANCE');
-                        setIsSearchModalOpen(false);
-                      }}
-                      className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-amber-400 hover:text-slate-950 text-slate-300 text-xs font-mono font-bold transition cursor-pointer border border-slate-700 hover:border-amber-400"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Smart Engine Hint */}
-            <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 leading-relaxed space-y-1">
-              <div className="flex items-center gap-1.5 text-amber-400 font-bold">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>كيف يعمل محرك الشارت الذكي مع رموز البلوكتشين؟</span>
-              </div>
-              <p>
-                عملات البلوكتشين اللامركزية (مثل ATF على شبكة TON) تُدرج عبر مجمعات السيولة في STON.fi.
-                يقوم محركنا الذكي بالتعرف الفوري على رموز TON وصيغ العقود وتحويلها مباشرة إلى تغذية TradingView المعتمدة (مثل <code className="text-amber-300 font-mono">STONFI2:ATFUSDT_EQAY5H</code>) لتعمل بدون أي حظر أو رسائل خطأ.
-              </p>
+                }}
+                className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer"
+              >
+                عرض الشارت
+              </button>
             </div>
           </div>
         </div>
