@@ -12,6 +12,9 @@ export interface WatchlistItem {
   hasAlert?: boolean;
   alertPrice?: string;
   alertDirection?: 'above' | 'below';
+  alertRepeatMode?: 'once' | 'continuous';
+  alertIntervalSeconds?: number;
+  alertToneId?: string;
   entryPrice?: string;
   breakEvenPrice?: string;
   tradeAmount?: string;

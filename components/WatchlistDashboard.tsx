@@ -8,23 +8,23 @@ import {
   Radio, 
   Search, 
   ArrowUpDown, 
-  GripVertical
+  GripVertical,
+  Bell
 } from 'lucide-react';
 import { WatchlistItem, WatchlistCategory, WatchlistFlagColor, WatchlistTickerData } from '@/types/watchlist';
 import { CurrencyItem } from '@/types/currency';
-import { ScalpTrade } from '@/types/scalper';
 import { WatchlistRow } from './WatchlistRow';
 import { WatchlistActionModal } from './WatchlistActionModal';
 import { AddWatchlistSymbolModal } from './AddWatchlistSymbolModal';
 import { CoinAvatar } from './CoinAvatar';
 import { trimTrailingZeros } from '@/lib/calculator';
+import { openUnifiedAlertsCenter } from '@/lib/unifiedAlerts';
 
 interface WatchlistDashboardProps {
   watchlistItems: WatchlistItem[];
   livePrices: Record<string, string>;
   isLiveStreamActive: boolean;
   currencies: CurrencyItem[];
-  scalpTrades: ScalpTrade[];
   onToggleLiveStream: (active: boolean) => void;
   onUpdateWatchlistItem: (item: WatchlistItem) => void;
   onAddWatchlistItem: (symbol: string, category: WatchlistCategory, flagColor: WatchlistFlagColor) => void;
@@ -41,7 +41,6 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
   livePrices,
   isLiveStreamActive,
   currencies,
-  scalpTrades,
   onToggleLiveStream,
   onUpdateWatchlistItem,
   onAddWatchlistItem,
@@ -118,7 +117,6 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
     watchlistItems.forEach((item) => {
       const cleanName = item.name.toUpperCase();
       const matchedCurrency = currencies.find((c) => c.name === cleanName);
-      const matchedScalp = scalpTrades.find((s) => s.name === cleanName);
 
       let entry = item.entryPrice || '';
       let be = item.breakEvenPrice || '';
@@ -130,12 +128,6 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
           const buyFee = parseFloat(matchedCurrency.entryFeePercent || '0.1') || 0.1;
           const sellFee = parseFloat(matchedCurrency.exitFeePercent || '0.1') || 0.1;
           be = ((pNum * (1 + buyFee / 100)) / (1 - sellFee / 100)).toFixed(6);
-        }
-      } else if (matchedScalp && matchedScalp.entryPrice) {
-        entry = matchedScalp.entryPrice;
-        const pNum = parseFloat(entry);
-        if (!isNaN(pNum) && pNum > 0) {
-          be = ((pNum * 1.001) / 0.999).toFixed(6);
         }
       }
 
@@ -149,8 +141,6 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
         netPnlPercent = (diff / entryNum) * 100;
         const qty = matchedCurrency?.coinQuantity 
           ? parseFloat(matchedCurrency.coinQuantity) 
-          : matchedScalp?.coinQuantity 
-          ? parseFloat(matchedScalp.coinQuantity) 
           : 100 / entryNum;
         netPnlUsdt = diff * qty;
       }
@@ -164,7 +154,7 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
     });
 
     return map;
-  }, [watchlistItems, currencies, scalpTrades, livePrices]);
+  }, [watchlistItems, currencies, livePrices]);
 
   // Touch and Pointer Long-Press Drag Reordering Logic
   const handlePointerDownRow = (e: React.PointerEvent<HTMLDivElement>, item: WatchlistItem) => {
@@ -401,6 +391,17 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
             <span>اضغط مطولاً للسحب للأعلى أو الأسفل</span>
           </span>
 
+          {/* Unified Alerts Center Quick Link */}
+          <button
+            type="button"
+            onClick={() => openUnifiedAlertsCenter('watchlist')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-700 dark:text-amber-300 transition cursor-pointer"
+            title="فتح تنبيهات المراقبة في مركز التنبيهات الموحد"
+          >
+            <Bell className="w-3.5 h-3.5 text-amber-500" />
+            <span>مركز التنبيهات</span>
+          </button>
+
           {/* Binance Stream Button */}
           <button
             type="button"
@@ -506,6 +507,7 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
 
       {/* Quick Actions Drawer / Modal with Move to Category & Delete */}
       <WatchlistActionModal
+        key={selectedItem?.id || 'empty'}
         isOpen={Boolean(selectedItem)}
         item={selectedItem}
         livePrice={selectedItem ? livePrices[selectedItem.symbol] : undefined}
@@ -515,12 +517,6 @@ export const WatchlistDashboard: React.FC<WatchlistDashboardProps> = ({
         onOpenInScalper={(item) => onNavigateToScalper(item.name)}
         onSetAlert={(item, price, dir) => {
           onSetPriceAlert(item.symbol, price, dir);
-          onUpdateWatchlistItem({
-            ...item,
-            hasAlert: true,
-            alertPrice: price,
-            alertDirection: dir,
-          });
         }}
         onUpdateFlag={(itemId, flag) => {
           const item = watchlistItems.find((i) => i.id === itemId);

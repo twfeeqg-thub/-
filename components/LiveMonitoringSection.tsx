@@ -27,6 +27,7 @@ import { systemNotification } from '@/lib/systemNotification';
 import { useSystemNotification } from '@/hooks/useSystemNotification';
 import { formatCurrencyPrice } from '@/lib/calculator';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
+import { dispatchUnifiedNotification, openUnifiedAlertsCenter } from '@/lib/unifiedAlerts';
 
 interface LiveMonitoringSectionProps {
   currencyName: string;
@@ -38,6 +39,10 @@ interface LiveMonitoringSectionProps {
   onChangeTargetPrice: (price: string) => void;
   targetDirection: 'above' | 'below';
   onChangeTargetDirection: (dir: 'above' | 'below') => void;
+  alertRepeatMode?: 'once' | 'continuous';
+  alertIntervalSeconds?: number;
+  alertToneId?: AlertToneId;
+  onChangeAlertToneId?: (tone: AlertToneId) => void;
   onApplyPriceAsEntry: (price: string) => void;
   onAddPriceAsTest: (price: string) => void;
   breakEvenPrice?: number;
@@ -75,6 +80,10 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
   onChangeTargetPrice,
   targetDirection,
   onChangeTargetDirection,
+  alertRepeatMode = 'once',
+  alertIntervalSeconds = 60,
+  alertToneId,
+  onChangeAlertToneId,
   onApplyPriceAsEntry,
   onAddPriceAsTest,
   breakEvenPrice,
@@ -86,14 +95,22 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [targetReached, setTargetReached] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [selectedTone, setSelectedTone] = useState<AlertToneId>(() => soundAlert.getActiveTone());
+  const [localTone, setLocalTone] = useState<AlertToneId>('bell');
   const [isEditingSymbol, setIsEditingSymbol] = useState(false);
   const [customInputSymbol, setCustomInputSymbol] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  const selectedTone = alertToneId || localTone;
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setLocalTone(soundAlert.getActiveTone());
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+
   // System Push Notification Hook (Desktop & Mobile)
   const { 
-    isSupported: notifSupported, 
     permission: notifPermission, 
     isGranted: notifGranted, 
     isDenied: notifDenied, 
@@ -104,7 +121,6 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
 
   const wsRef = useRef<WebSocket | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const lastAlertTimeRef = useRef<number>(0);
 
   // Symbol resolution
   const formattedSymbol = resolveBinanceSymbol(currencyName, binanceSymbol);
@@ -128,25 +144,33 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
 
     if (isReached) {
       setTargetReached(true);
-      if (canTriggerAlert('targetExit', formattedSymbol)) {
+      if (canTriggerAlert('targetExit', formattedSymbol, alertRepeatMode, alertIntervalSeconds)) {
         recordAlertTriggered('targetExit', formattedSymbol);
+        const title = `🎯 وصل السعر للهدف (${formattedSymbol})!`;
+        const body = `السعر الحالي ${livePrice} USDT وصل إلى سعرك المستهدف ${targetNum} USDT (${targetDirection === 'above' ? 'صعوداً 📈' : 'هبوطاً 📉'}).`;
         if (soundEnabled) {
-          soundAlert.playTargetReachedAlert(selectedTone);
+          dispatchUnifiedNotification({
+            title,
+            body,
+            tag: `target-${formattedSymbol}`,
+            toneId: selectedTone,
+            requireInteraction: true,
+          });
+        } else {
+          systemNotification.sendNotification({
+            title,
+            body,
+            tag: `target-${formattedSymbol}`,
+            icon: '/pwa-192x192.png',
+            badge: '/icon.svg',
+            renotify: true,
+            requireInteraction: true,
+            vibrate: [250, 100, 250, 100, 400],
+          });
         }
-        // Send rich Desktop/Mobile system push notification via Notification API & Service Worker
-        systemNotification.sendNotification({
-          title: `🎯 وصل السعر للهدف (${formattedSymbol})!`,
-          body: `السعر الحالي ${livePrice} USDT وصل إلى سعرك المستهدف ${targetNum} USDT (${targetDirection === 'above' ? 'صعوداً 📈' : 'هبوطاً 📉'}).`,
-          tag: `target-${formattedSymbol}`,
-          icon: '/pwa-192x192.png',
-          badge: '/icon.svg',
-          renotify: true,
-          requireInteraction: true,
-          vibrate: [300, 150, 300, 150, 450],
-        });
       }
     }
-  }, [targetPrice, targetDirection, soundEnabled, selectedTone, formattedSymbol]);
+  }, [targetPrice, targetDirection, soundEnabled, selectedTone, formattedSymbol, alertRepeatMode, alertIntervalSeconds]);
 
   // Fetch price from REST API with strict timeout
   const fetchPriceRest = useCallback(async (symbol: string) => {
@@ -333,23 +357,35 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
           </div>
         </div>
 
-        {/* Master ON/OFF Switch */}
-        <button
-          type="button"
-          onClick={() => onToggleActive(!isActive)}
-          className={`relative inline-flex h-6 w-12 items-center rounded-full transition-colors cursor-pointer focus:outline-none ${
-            isActive ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
-          }`}
-          role="switch"
-          aria-checked={isActive}
-          title={isActive ? 'إيقاف وضع المراقبة' : 'تشغيل وضع المراقبة'}
-        >
-          <span
-            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-              isActive ? 'translate-x-1' : 'translate-x-7'
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => openUnifiedAlertsCenter('calculator')}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/30 transition cursor-pointer"
+            title="إدارة تنبيهات الحاسبة والمراقبة من المركز الموحد"
+          >
+            <Bell className="w-3.5 h-3.5 text-amber-500" />
+            <span className="hidden sm:inline">مركز التنبيهات</span>
+          </button>
+
+          {/* Master ON/OFF Switch */}
+          <button
+            type="button"
+            onClick={() => onToggleActive(!isActive)}
+            className={`relative inline-flex h-6 w-12 items-center rounded-full transition-colors cursor-pointer focus:outline-none ${
+              isActive ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
             }`}
-          />
-        </button>
+            role="switch"
+            aria-checked={isActive}
+            title={isActive ? 'إيقاف وضع المراقبة' : 'تشغيل وضع المراقبة'}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                isActive ? 'translate-x-1' : 'translate-x-7'
+              }`}
+            />
+          </button>
+        </div>
       </div>
 
       {/* Active Monitoring Panel */}
@@ -721,8 +757,9 @@ export const LiveMonitoringSection: React.FC<LiveMonitoringSectionProps> = ({
               <SoundToneSelector
                 selectedTone={selectedTone}
                 onSelectTone={(tone) => {
-                  setSelectedTone(tone);
+                  setLocalTone(tone);
                   soundAlert.setActiveTone(tone);
+                  onChangeAlertToneId?.(tone);
                 }}
                 title="تخصيص نغمة تنبيه الوصول للهدف:"
               />

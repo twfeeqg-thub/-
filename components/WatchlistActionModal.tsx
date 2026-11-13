@@ -17,6 +17,7 @@ import {
 import { WatchlistItem, WatchlistFlagColor, WatchlistCategory } from '@/types/watchlist';
 import { CoinAvatar } from './CoinAvatar';
 import { trimTrailingZeros } from '@/lib/calculator';
+import { openUnifiedAlertsCenter } from '@/lib/unifiedAlerts';
 
 interface WatchlistActionModalProps {
   isOpen: boolean;
@@ -278,6 +279,20 @@ export const WatchlistActionModal: React.FC<WatchlistActionModalProps> = ({
                     <span>حفظ وتفعيل التنبيه</span>
                   </>
                 )}
+              </button>
+            </div>
+
+            <div className="pt-2 border-t border-amber-500/20 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  openUnifiedAlertsCenter('watchlist');
+                }}
+                className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <Bell className="w-3 h-3" />
+                <span>إدارة التكرار والنغمة والمزامنة السحابية من المركز الموحد</span>
               </button>
             </div>
           </div>

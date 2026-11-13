@@ -50,8 +50,14 @@ import { CoinAvatar } from './CoinAvatar';
 import { trimTrailingZeros } from '@/lib/calculator';
 import { useTheme } from '@/context/ThemeContext';
 import { systemNotification } from '@/lib/systemNotification';
-import { soundAlert } from '@/lib/soundAlert';
+import { soundAlert, AlertToneId } from '@/lib/soundAlert';
 import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
+import {
+  dispatchUnifiedNotification,
+  emitUnifiedAlertsChanged,
+  openUnifiedAlertsCenter,
+  EVENT_CHART_ALERTS_CHANGED,
+} from '@/lib/unifiedAlerts';
 import { 
   CandleData, 
   LinePoint,
@@ -180,6 +186,9 @@ export interface CustomChartLine {
   hasAlert?: boolean;
   alertDirection?: 'above' | 'below';
   alertFired?: boolean;
+  alertRepeatMode?: 'once' | 'continuous';
+  alertIntervalSeconds?: number;
+  alertToneId?: AlertToneId;
 }
 
 export interface PersistentIndicatorConfig {
@@ -389,8 +398,16 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   const persistCustomLines = useCallback((lines: CustomChartLine[]) => {
     try {
       localStorage.setItem(storageKeyCustomLines, JSON.stringify(lines));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(EVENT_CHART_ALERTS_CHANGED, {
+            detail: { symbol: binanceSymbol, fromChartModal: true },
+          })
+        );
+        emitUnifiedAlertsChanged('chart_lines');
+      }
     } catch {}
-  }, [storageKeyCustomLines]);
+  }, [storageKeyCustomLines, binanceSymbol]);
 
   // Target Exit Price Alert
   const storageKeyExitAlert = `tv_exit_alert_${binanceSymbol}`;
@@ -416,9 +433,22 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
 
   const persistExitAlert = useCallback((price: string, active: boolean, fired = false) => {
     try {
-      localStorage.setItem(storageKeyExitAlert, JSON.stringify({ price, active, fired }));
+      const prevRaw = localStorage.getItem(storageKeyExitAlert);
+      const prev = prevRaw ? JSON.parse(prevRaw) : {};
+      localStorage.setItem(
+        storageKeyExitAlert,
+        JSON.stringify({ ...prev, price, active, fired })
+      );
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(EVENT_CHART_ALERTS_CHANGED, {
+            detail: { symbol: binanceSymbol, fromChartModal: true },
+          })
+        );
+        emitUnifiedAlertsChanged('chart_lines');
+      }
     } catch {}
-  }, [storageKeyExitAlert]);
+  }, [storageKeyExitAlert, binanceSymbol]);
 
   // Add/Edit Line Modal State
   const [isLineEditorOpen, setIsLineEditorOpen] = useState(false);
@@ -474,6 +504,47 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     customLinesRef.current = customLines;
   }, [customLines]);
   const firedAlertsRef = useRef<Set<string>>(new Set());
+
+  // Two-way sync when UnifiedAlertsModal edits or resets chart lines / exit alerts (or symbol changes)
+  useEffect(() => {
+    const loadStoredChartAlerts = () => {
+      try {
+        const rawLines = localStorage.getItem(storageKeyCustomLines);
+        const parsedLines = rawLines ? JSON.parse(rawLines) : [];
+        setCustomLines(Array.isArray(parsedLines) ? parsedLines : []);
+      } catch {
+        setCustomLines([]);
+      }
+      try {
+        const rawExit = localStorage.getItem(storageKeyExitAlert);
+        if (rawExit) {
+          const parsedExit = JSON.parse(rawExit);
+          setExitAlertPrice(parsedExit.price || '');
+          setExitAlertActive(Boolean(parsedExit.active));
+        } else {
+          setExitAlertPrice('');
+          setExitAlertActive(false);
+        }
+      } catch {
+        // Ignore
+      }
+      firedAlertsRef.current.clear();
+    };
+
+    const timer = setTimeout(loadStoredChartAlerts, 0);
+
+    const handleExternalChartChange = (e: Event) => {
+      if (e instanceof CustomEvent && e.detail?.fromChartModal) return;
+      if (e instanceof CustomEvent && e.detail?.symbol && e.detail.symbol !== binanceSymbol) return;
+      loadStoredChartAlerts();
+    };
+
+    window.addEventListener(EVENT_CHART_ALERTS_CHANGED, handleExternalChartChange);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener(EVENT_CHART_ALERTS_CHANGED, handleExternalChartChange);
+    };
+  }, [storageKeyCustomLines, storageKeyExitAlert, binanceSymbol]);
 
   const handleEditLine = useCallback((line: CustomChartLine) => {
     setEditingLineId(line.id);
@@ -859,7 +930,7 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
   }, [entryNum, beNum, breakEvenSpreadPercent, exitAlertActive, exitAlertPrice, customLines]);
 
   // ---------------------------------------------------------------------------
-  // PRICE ALERTS MONITORING
+  // PRICE ALERTS MONITORING (Synced lock IDs with Unified Background Engine)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!currentPriceNum || isNaN(currentPriceNum) || currentPriceNum <= 0) return;
@@ -867,42 +938,77 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
     // Check Exit Target Alert
     const exitNum = parseFloat(exitAlertPrice);
     if (exitAlertActive && !isNaN(exitNum) && exitNum > 0) {
-      const shouldTrigger = entryNum && !isNaN(entryNum) && exitNum >= entryNum
-        ? currentPriceNum >= exitNum
-        : currentPriceNum <= exitNum;
+      let exitRepeatMode: 'once' | 'continuous' = 'once';
+      let exitIntervalSec = 60;
+      let exitToneId: AlertToneId | undefined = undefined;
+      let exitFiredFlag = false;
+      try {
+        const rawExit = localStorage.getItem(storageKeyExitAlert);
+        if (rawExit) {
+          const parsed = JSON.parse(rawExit);
+          exitRepeatMode = parsed.repeatMode || 'once';
+          exitIntervalSec = parsed.intervalSeconds || 60;
+          exitToneId = parsed.toneId as AlertToneId | undefined;
+          exitFiredFlag = Boolean(parsed.fired);
+        }
+      } catch {}
 
-      if (shouldTrigger && canTriggerAlert('targetExit')) {
-        recordAlertTriggered('targetExit');
-        soundAlert.playTargetReachedAlert();
-        systemNotification.sendNotification({
-          title: `🎯 وصول هدف الخروج: ${binanceSymbol}`,
-          body: `وصل السعر إلى $${currentPriceNum} (الهدف: $${exitNum})`,
-          tag: `exit_${binanceSymbol}`,
-        });
+      if (!(exitRepeatMode === 'once' && exitFiredFlag)) {
+        const shouldTrigger = entryNum && !isNaN(entryNum) && exitNum < entryNum
+          ? currentPriceNum <= exitNum
+          : currentPriceNum >= exitNum;
+
+        const uniqueExitId = `chart_exit_${binanceSymbol}`;
+        if (shouldTrigger && canTriggerAlert('targetExit', uniqueExitId, exitRepeatMode, exitIntervalSec)) {
+          recordAlertTriggered('targetExit', uniqueExitId);
+          dispatchUnifiedNotification({
+            title: `🎯 وصول هدف خروج الشارت: ${binanceSymbol}`,
+            body: `وصل السعر إلى $${currentPriceNum} (هدف الخروج: $${exitNum})`,
+            tag: `exit_${binanceSymbol}`,
+            toneId: exitToneId || soundAlert.getActiveTone(),
+          });
+          if (exitRepeatMode === 'once') {
+            persistExitAlert(exitAlertPrice, exitAlertActive, true);
+          }
+        }
       }
     }
 
     // Check Custom Lines Alerts
-    customLines.forEach((cl) => {
-      if (!cl.hasAlert || cl.alertFired || firedAlertsRef.current.has(cl.id)) return;
-      const triggered = cl.alertDirection === 'above' ? currentPriceNum >= cl.price : currentPriceNum <= cl.price;
-      if (triggered && canTriggerAlert('chartLines')) {
+    let anyLineUpdated = false;
+    const nextLines = customLines.map((cl) => {
+      if (!cl.hasAlert) return cl;
+      const repeatMode = cl.alertRepeatMode || 'once';
+      if (repeatMode === 'once' && (cl.alertFired || firedAlertsRef.current.has(cl.id))) {
+        return cl;
+      }
+      const dir = cl.alertDirection || 'above';
+      const triggered = dir === 'above' ? currentPriceNum >= cl.price : currentPriceNum <= cl.price;
+      const uniqueLineId = `${binanceSymbol}_${cl.id}`;
+
+      if (triggered && canTriggerAlert('chartLines', uniqueLineId, repeatMode, cl.alertIntervalSeconds || 60)) {
         firedAlertsRef.current.add(cl.id);
-        recordAlertTriggered('chartLines');
-        soundAlert.playTone('bell');
-        systemNotification.sendNotification({
-          title: `🔔 وصول السعر للمستوى: ${cl.label || binanceSymbol}`,
-          body: `السعر الآن $${currentPriceNum} تخطى المستوى $${cl.price}`,
+        recordAlertTriggered('chartLines', uniqueLineId);
+        dispatchUnifiedNotification({
+          title: `🔔 ملامسة خط الشارت: ${cl.label || binanceSymbol}`,
+          body: `السعر الحالي $${currentPriceNum} تخطى الخط المحدد عند $${cl.price}`,
           tag: `line_${cl.id}`,
+          toneId: cl.alertToneId || 'bell',
         });
 
-        // Mark fired
-        const next = customLines.map((l) => (l.id === cl.id ? { ...l, alertFired: true } : l));
-        setCustomLines(next);
-        persistCustomLines(next);
+        if (repeatMode === 'once') {
+          anyLineUpdated = true;
+          return { ...cl, alertFired: true };
+        }
       }
+      return cl;
     });
-  }, [currentPriceNum, exitAlertActive, exitAlertPrice, entryNum, binanceSymbol, customLines, persistCustomLines]);
+
+    if (anyLineUpdated) {
+      setCustomLines(nextLines);
+      persistCustomLines(nextLines);
+    }
+  }, [currentPriceNum, exitAlertActive, exitAlertPrice, entryNum, binanceSymbol, customLines, persistCustomLines, persistExitAlert, storageKeyExitAlert]);
 
   // ---------------------------------------------------------------------------
   // LINE MANAGEMENT HANDLERS
@@ -1187,6 +1293,17 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
               >
                 <Plus className="w-3.5 h-3.5 stroke-[3]" />
                 <span className="hidden sm:inline">خط</span>
+              </button>
+
+              {/* Unified Alerts Center Shortcut Button */}
+              <button
+                type="button"
+                onClick={() => openUnifiedAlertsCenter('chart_lines')}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/40 font-bold text-xs transition cursor-pointer"
+                title="إدارة تنبيهات خطوط الشارت وهدف الخروج من المركز الموحد"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">التنبيهات</span>
               </button>
 
               {/* Technical Indicators Config Button */}
@@ -1566,18 +1683,29 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
             </div>
 
             {/* Alert Toggle */}
-            <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/80 border border-slate-700 cursor-pointer">
-              <span className="flex items-center gap-2 text-xs font-bold">
-                <Bell className="w-4 h-4 text-amber-400" />
-                <span>تفعيل تنبيه صوتي وإشعار عند وصول السعر لهذا الخط</span>
-              </span>
-              <input
-                type="checkbox"
-                checked={lineEditorAlert}
-                onChange={(e) => setLineEditorAlert(e.target.checked)}
-                className="w-4 h-4 accent-amber-500 cursor-pointer"
-              />
-            </label>
+            <div className="space-y-2">
+              <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/80 border border-slate-700 cursor-pointer">
+                <span className="flex items-center gap-2 text-xs font-bold">
+                  <Bell className="w-4 h-4 text-amber-400" />
+                  <span>تفعيل تنبيه صوتي وإشعار عند وصول السعر لهذا الخط</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={lineEditorAlert}
+                  onChange={(e) => setLineEditorAlert(e.target.checked)}
+                  className="w-4 h-4 accent-amber-500 cursor-pointer"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={() => openUnifiedAlertsCenter('chart_lines')}
+                className="w-full py-1.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/25 text-amber-400 text-[11px] font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span>تخصيص التكرار والنغمة والسحابة في مركز التنبيهات الموحد</span>
+              </button>
+            </div>
 
             {/* Actions */}
             <div className="flex items-center justify-between pt-2 border-t border-slate-800">
@@ -1746,6 +1874,15 @@ export const TradingViewChartModal: React.FC<TradingViewChartModalProps> = ({
                 className="w-4 h-4 accent-pink-500 cursor-pointer"
               />
             </label>
+
+            <button
+              type="button"
+              onClick={() => openUnifiedAlertsCenter('chart_lines')}
+              className="w-full py-1.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/25 text-amber-400 text-[11px] font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>تخصيص التكرار والنغمة والسحابة في مركز التنبيهات الموحد</span>
+            </button>
 
             <div className="flex items-center justify-between pt-2 border-t border-slate-800">
               <button

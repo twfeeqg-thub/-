@@ -20,7 +20,11 @@ import {
 } from '@/lib/marketSessions';
 import { MarketAlertSettingsModal } from './MarketAlertSettingsModal';
 import { soundAlert, AlertToneId } from '@/lib/soundAlert';
-import { systemNotification } from '@/lib/systemNotification';
+import {
+  dispatchUnifiedNotification,
+  emitUnifiedAlertsChanged,
+  EVENT_MARKET_ALERTS_CHANGED,
+} from '@/lib/unifiedAlerts';
 import { 
   Globe, 
   Clock, 
@@ -105,9 +109,24 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
       setMakkahTime(getCurrentMakkahTime());
     }, 1000);
 
+    const handleExternalMarketAlertChange = (e: Event) => {
+      if (e instanceof CustomEvent && e.detail?.fromMarketBar) return;
+      try {
+        const savedAlerts = localStorage.getItem(STORAGE_KEY_MARKET_ALERT_CONFIG);
+        if (savedAlerts) {
+          setAlertConfig(JSON.parse(savedAlerts));
+        }
+      } catch {
+        // Ignore
+      }
+    };
+
+    window.addEventListener(EVENT_MARKET_ALERTS_CHANGED, handleExternalMarketAlertChange);
+
     return () => {
       clearTimeout(timer);
       clearInterval(interval);
+      window.removeEventListener(EVENT_MARKET_ALERTS_CHANGED, handleExternalMarketAlertChange);
     };
   }, []);
 
@@ -124,6 +143,14 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
     try {
       localStorage.setItem(STORAGE_KEY_MARKET_ALERT_CONFIG, JSON.stringify(newConfig));
     } catch {}
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent(EVENT_MARKET_ALERTS_CHANGED, {
+          detail: { fromMarketBar: true, config: newConfig },
+        })
+      );
+      emitUnifiedAlertsChanged('market_sessions');
+    }
   };
 
   // Liquidity Info
@@ -181,13 +208,11 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
       if (!firedSessionAlertsRef.current.has(overlapKey)) {
         firedSessionAlertsRef.current.add(overlapKey);
         persistSessionAlerts();
-        soundAlert.playTone((alertConfig.soundTone as AlertToneId) || 'bell');
-        systemNotification.sendNotification({
+        dispatchUnifiedNotification({
           title: '🔥 بدأت ذروة السيولة العالمية (لندن + نيويورك)!',
           body: 'تداخل الجلستين الأكبر في العالم الآن بتوقيت مكة. فرصة مثالية لاقتناص تحركات واقتناص قيعان السكالبينج.',
           tag: 'golden-overlap-alert',
-          icon: '/pwa-192x192.png',
-          badge: '/icon.svg',
+          toneId: (alertConfig.soundTone as AlertToneId) || 'bell',
         });
       }
     }
@@ -202,13 +227,11 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
         if (!firedSessionAlertsRef.current.has(preKey)) {
           firedSessionAlertsRef.current.add(preKey);
           persistSessionAlerts();
-          soundAlert.playTone((alertConfig.soundTone as AlertToneId) || 'bell');
-          systemNotification.sendNotification({
+          dispatchUnifiedNotification({
             title: `⏳ اقترب افتتاح ${session.name}!`,
             body: `تبقى ${countdown.minutesRemaining} دقيقة على افتتاح بورصة ${session.city}. استعد لدخول السيولة.`,
             tag: `pre-open-${session.id}`,
-            icon: '/pwa-192x192.png',
-            badge: '/icon.svg',
+            toneId: (alertConfig.soundTone as AlertToneId) || 'bell',
           });
         }
       }
@@ -219,13 +242,11 @@ export const MarketSessionsTopBar: React.FC<MarketSessionsTopBarProps> = ({
         if (!firedSessionAlertsRef.current.has(openKey)) {
           firedSessionAlertsRef.current.add(openKey);
           persistSessionAlerts();
-          soundAlert.playTone((alertConfig.soundTone as AlertToneId) || 'bell');
-          systemNotification.sendNotification({
+          dispatchUnifiedNotification({
             title: `🟢 افتتحت الآن ${session.name}!`,
             body: `بدأت الآن جلسة ${session.city}. تدفق السيولة وبدء تنفيذ أوامر السوق.`,
             tag: `open-${session.id}`,
-            icon: '/pwa-192x192.png',
-            badge: '/icon.svg',
+            toneId: (alertConfig.soundTone as AlertToneId) || 'bell',
           });
         }
       }

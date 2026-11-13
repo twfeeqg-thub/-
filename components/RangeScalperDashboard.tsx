@@ -18,9 +18,11 @@ import { analyzeRangeFromMinuteKlines, calculateRangeBreakEven, fetchBinanceUsdt
 import { RangeTradeCard } from './RangeTradeCard';
 import { RangeTradeLedger } from './RangeTradeLedger';
 import { trimTrailingZeros } from '@/lib/calculator';
-import { soundAlert, AlertToneId } from '@/lib/soundAlert';
-import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
-import { systemNotification } from '@/lib/systemNotification';
+import {
+  EVENT_RANGE_TRADES_CHANGED,
+  emitUnifiedAlertsChanged,
+  openUnifiedAlertsCenter,
+} from '@/lib/unifiedAlerts';
 import { 
   Layers, 
   Search, 
@@ -28,7 +30,7 @@ import {
   Radio, 
   Calculator, 
   TrendingUp, 
-  Zap, 
+  Bell,
   LayoutList, 
   Palette, 
   Clock, 
@@ -90,6 +92,12 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
       localStorage.setItem(STORAGE_KEY_RANGE_TRADES, JSON.stringify(newTrades));
     } catch {
       // Ignore
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent(EVENT_RANGE_TRADES_CHANGED, { detail: { fromRangeDashboard: true } })
+      );
+      emitUnifiedAlertsChanged('range_master');
     }
   }, []);
 
@@ -208,6 +216,31 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
 
     return () => clearTimeout(timer);
   }, [capitalNum]);
+
+  // Two-way sync when UnifiedAlertsModal or Binance Wallet updates Range Master data
+  useEffect(() => {
+    const handleExternalSync = (e: Event) => {
+      if (e instanceof CustomEvent && e.detail?.fromRangeDashboard) return;
+      try {
+        const savedTrades = localStorage.getItem(STORAGE_KEY_RANGE_TRADES);
+        if (savedTrades) {
+          const parsed = JSON.parse(savedTrades);
+          if (Array.isArray(parsed)) setTrades(parsed);
+        }
+        const savedLast = localStorage.getItem(STORAGE_KEY_RANGE_LAST_STATE);
+        if (savedLast) {
+          const parsed: RangeLastState = JSON.parse(savedLast);
+          if (parsed.tradeCapitalInput) {
+            setTradeCapitalInput(parsed.tradeCapitalInput);
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    };
+    window.addEventListener(EVENT_RANGE_TRADES_CHANGED, handleExternalSync);
+    return () => window.removeEventListener(EVENT_RANGE_TRADES_CHANGED, handleExternalSync);
+  }, []);
 
   // Synchronize percent to USDT
   const handleUpdateFeePercent = (type: 'entry' | 'exit' | 'slippage', percentVal: string) => {
@@ -500,192 +533,8 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
     persistTrades(next);
   };
 
-  // -------------------------------------------------------------
-  // REAL-TIME SMART NOTIFICATION ENGINE (شروط التنبيه المتعددة مع الحفظ الدائم)
-  // -------------------------------------------------------------
-  const lastAlertTimesRef = useRef<Map<string, number>>(new Map());
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('price_calc_v0_range_alert_timestamps');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object') {
-            Object.entries(parsed).forEach(([k, v]) => {
-              if (typeof v === 'number') lastAlertTimesRef.current.set(k, v);
-            });
-          }
-        }
-      } catch {
-        // Ignore
-      }
-    }
-  }, []);
-
-  const persistRangeAlertTimes = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const obj: Record<string, number> = {};
-      lastAlertTimesRef.current.forEach((v, k) => {
-        obj[k] = v;
-      });
-      localStorage.setItem('price_calc_v0_range_alert_timestamps', JSON.stringify(obj));
-    } catch {
-      // Ignore
-    }
-  }, []);
-
-  useEffect(() => {
-    const now = Date.now();
-    let anyAlertArmed = false;
-
-    trades.forEach((trade) => {
-      if (trade.isActive === false) return;
-      const livePStr = livePrices[trade.binanceSymbol];
-      if (!livePStr) return;
-      const liveP = parseFloat(livePStr);
-      if (isNaN(liveP) || liveP <= 0) return;
-
-      const cfg = trade.alertConfig || DEFAULT_RANGE_ALERT_CONFIG;
-      const isAlertActive = trade.alertsEnabled && cfg.enabled;
-      if (isAlertActive) {
-        anyAlertArmed = true;
-      }
-
-      // Helper to check repeat interval
-      const canFire = (conditionKey: string): boolean => {
-        const fullKey = `${trade.id}_${conditionKey}`;
-        const lastTime = lastAlertTimesRef.current.get(fullKey) || 0;
-        if (cfg.repeatMode === 'once') {
-          return lastTime === 0;
-        }
-        const intervalMs = (cfg.repeatIntervalMinutes || 5) * 60 * 1000;
-        return now - lastTime >= intervalMs;
-      };
-
-      const recordFired = (conditionKey: string) => {
-        const fullKey = `${trade.id}_${conditionKey}`;
-        lastAlertTimesRef.current.set(fullKey, now);
-        persistRangeAlertTimes();
-        soundAlert.playTone((cfg.toneId as AlertToneId) || 'celebration');
-      };
-
-      // 1. WATCHING TROUGH ALERTS
-      if (trade.status === 'watching_trough' && isAlertActive) {
-        // A. At Trough (عند القاع بدقة)
-        if (cfg.triggerAtTrough && trade.troughPrice > 0) {
-          const atTrough = liveP <= trade.troughPrice || ((liveP - trade.troughPrice) / trade.troughPrice) <= 0.002;
-          if (atTrough && canFire('at_trough')) {
-            recordFired('at_trough');
-            systemNotification.sendNotification({
-              title: `🎯 وصل السعر للقاع: ${trade.name}!`,
-              body: `وصل سعر ${trade.name} بدقة لمنطقة القاع ($${liveP}). صافي الربح المتوقع للصعود: +$${trade.netMarginUsdt?.toFixed(2) || '—'} (+${trade.netMarginPercent.toFixed(2)}%). سعر التعادل: $${trade.breakEvenPrice.toFixed(4)}.`,
-              tag: `trough-${trade.id}`,
-              icon: '/pwa-192x192.png',
-              badge: '/icon.svg',
-            });
-          }
-        }
-
-        // B. Near Trough (عند الاقتراب من القاع)
-        if (cfg.triggerNearTrough && trade.troughPrice > 0) {
-          const distPct = ((liveP - trade.troughPrice) / trade.troughPrice) * 100;
-          if (distPct > 0 && distPct <= (cfg.nearTroughPercent || 0.5) && canFire('near_trough')) {
-            recordFired('near_trough');
-            systemNotification.sendNotification({
-              title: `⏳ اقترب السعر من القاع: ${trade.name}!`,
-              body: `السعر الآن ($${liveP}) على بعد ${distPct.toFixed(2)}% فقط من قاع الشراء ($${trade.troughPrice}). تأهب للشراء!`,
-              tag: `near-trough-${trade.id}`,
-              icon: '/pwa-192x192.png',
-              badge: '/icon.svg',
-            });
-          }
-        }
-
-        // C. Bounce Confirmation (تأكيد الارتداد صعوداً من القاع)
-        if (cfg.triggerBounceConfirmation && trade.troughPrice > 0) {
-          const bouncePct = ((liveP - trade.troughPrice) / trade.troughPrice) * 100;
-          if (bouncePct >= (cfg.bounceConfirmationPercent || 0.4) && bouncePct <= ((cfg.bounceConfirmationPercent || 0.4) + 0.5) && canFire('bounce')) {
-            recordFired('bounce');
-            systemNotification.sendNotification({
-              title: `⚡ تأكد الارتداد صعوداً: ${trade.name}!`,
-              body: `ارتد سعر ${trade.name} بنسبة +${bouncePct.toFixed(2)}% فوق القاع ($${trade.troughPrice}). إشارة دخول صاعدة قوية!`,
-              tag: `bounce-${trade.id}`,
-              icon: '/pwa-192x192.png',
-              badge: '/icon.svg',
-            });
-          }
-        }
-      }
-
-      // 2. IN-TRADE ALERTS (أثناء الصفقة)
-      if (trade.status === 'in_trade' && isAlertActive) {
-        // A. At Peak (عند القمة بدقة)
-        if (cfg.triggerAtPeak && trade.peakPrice > 0) {
-          if (liveP >= trade.peakPrice && canFire('at_peak')) {
-            recordFired('at_peak');
-            systemNotification.sendNotification({
-              title: `🚀 وصل السعر للقمة المستهدفة: ${trade.name}!`,
-              body: `حقق سعر ${trade.name} هدف القمة ($${liveP}). حان وقت جني الأرباح والخروج!`,
-              tag: `peak-${trade.id}`,
-              icon: '/pwa-192x192.png',
-              badge: '/icon.svg',
-            });
-          }
-        }
-
-        // B. Near Peak (عند الاقتراب من القمة)
-        if (cfg.triggerNearPeak && trade.peakPrice > 0) {
-          const distPct = ((trade.peakPrice - liveP) / trade.peakPrice) * 100;
-          if (distPct > 0 && distPct <= (cfg.nearPeakPercent || 0.5) && canFire('near_peak')) {
-            recordFired('near_peak');
-            systemNotification.sendNotification({
-              title: `✨ اقترب السعر من القمة: ${trade.name}!`,
-              body: `السعر الآن ($${liveP}) على بعد ${distPct.toFixed(2)}% فقط من قمة البيع ($${trade.peakPrice}). استعد لجني الأرباح.`,
-              tag: `near-peak-${trade.id}`,
-              icon: '/pwa-192x192.png',
-              badge: '/icon.svg',
-            });
-          }
-        }
-      }
-
-      // 3. CUSTOM PRICE ALERT (سعر مخصص يحدده المستخدم)
-      if (isAlertActive && cfg.triggerCustomPrice && cfg.customPrice && cfg.customPrice > 0) {
-        const diffRatio = Math.abs(liveP - cfg.customPrice) / cfg.customPrice;
-        if (diffRatio <= 0.002 && canFire('custom_price')) {
-          recordFired('custom_price');
-          systemNotification.sendNotification({
-            title: `🔔 وصل السعر المخصص: ${trade.name}!`,
-            body: `وصل سعر ${trade.name} إلى السعر المخصص الذي حددته يدويًا ($${cfg.customPrice}).`,
-            tag: `custom-${trade.id}`,
-            icon: '/pwa-192x192.png',
-            badge: '/icon.svg',
-          });
-        }
-      }
-
-      // 4. OLD TROUGH RETURN ALERT (للصفقات المنتهية)
-      if (trade.status === 'closed' && trade.notifyOnOldTroughReturn && trade.troughPrice > 0) {
-        const distRatio = Math.abs(liveP - trade.troughPrice) / trade.troughPrice;
-        if (distRatio <= 0.003 && canFire('old_trough')) {
-          recordFired('old_trough');
-          systemNotification.sendNotification({
-            title: `🔄 عودة لنفس القاع القديم: ${trade.name}!`,
-            body: `عاد سعر ${trade.name} لملامسة القاع القديم ($${trade.troughPrice}) الذي حققت منه ربحاً سابقاً! فرصة ممتازة لتكرار الصفقة.`,
-            tag: `old-trough-${trade.id}`,
-            icon: '/pwa-192x192.png',
-            badge: '/icon.svg',
-          });
-        }
-      }
-    });
-
-    if (anyAlertArmed) {
-      soundAlert.enableBackgroundKeepAlive();
-    }
-  }, [trades, livePrices, persistRangeAlertTimes]);
+  // Range Master smart alerts are evaluated centrally across all tabs by
+  // evaluateBackgroundAlertsForSymbol in app/page.tsx (with two-way sync).
 
   // Active trades and closed trades
   const activeTrades = useMemo(() => {
@@ -786,14 +635,15 @@ export const RangeScalperDashboard: React.FC<RangeScalperDashboardProps> = ({
             <span>{isLiveStreamActive ? 'البث الموحد نشط' : 'البث متوقف'}</span>
           </button>
 
-          {/* Quick Hops to Other Screens */}
+          {/* Unified Alerts Control Center Shortcut */}
           <button
             type="button"
-            onClick={() => onNavigateToScalper()}
-            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition cursor-pointer"
+            onClick={() => openUnifiedAlertsCenter('range_master')}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-700 dark:text-amber-300 transition cursor-pointer"
+            title="إدارة تنبيهات صائد القيعان في مركز التنبيهات الموحد"
           >
-            <Zap className="w-3.5 h-3.5 text-emerald-500" />
-            <span className="hidden sm:inline">السكالبينج</span>
+            <Bell className="w-3.5 h-3.5 text-amber-500" />
+            <span className="hidden sm:inline">مركز التنبيهات</span>
           </button>
 
           <button

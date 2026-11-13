@@ -20,12 +20,7 @@ import {
   STORAGE_KEY_TRACKER, 
   STORAGE_KEY_TRACKER_STREAM 
 } from '@/types/tracker';
-import { 
-  ScalpTrade, 
-  ScalperSessionStats, 
-  STORAGE_KEY_SCALPER_TRADES, 
-  STORAGE_KEY_SCALPER_SESSION 
-} from '@/types/scalper';
+import { STORAGE_KEY_RANGE_LAST_STATE, STORAGE_KEY_RANGE_TRADES, RangeTrackedTrade } from '@/types/rangeScalper';
 import { CurrencyDashboard } from '@/components/CurrencyDashboard';
 import { FloatingContainer } from '@/components/FloatingContainer';
 import { TradeDataSection } from '@/components/TradeDataSection';
@@ -39,7 +34,6 @@ import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { WindowMode } from '@/components/WindowHeader';
 import { TrackerDashboard } from '@/components/TrackerDashboard';
 import { TrackerDetailView } from '@/components/TrackerDetailView';
-import { ScalperDashboard } from '@/components/ScalperDashboard';
 import { ThemeCustomizerModal } from '@/components/ThemeCustomizerModal';
 import { BreakEvenComparisonDrawer } from '@/components/BreakEvenComparisonDrawer';
 import { WatchlistDashboard } from '@/components/WatchlistDashboard';
@@ -49,6 +43,7 @@ import { BinanceQuickWidget, STORAGE_KEY_BINANCE_FAB_HIDDEN } from '@/components
 import { TradingViewChartModal } from '@/components/TradingViewChartModal';
 import { SplashScreen } from '@/components/SplashScreen';
 import { AccountSettingsDashboard } from '@/components/AccountSettingsDashboard';
+import { UnifiedAlertsModal, UnifiedAlertsFilterTab } from '@/components/UnifiedAlertsModal';
 import { getActiveAppIcon, applyIconToDom } from '@/lib/appIconManager';
 import { EVENT_DATA_RESTORED } from '@/lib/localBackup';
 import { 
@@ -59,9 +54,23 @@ import {
   DEFAULT_WATCHLIST_ITEMS 
 } from '@/types/watchlist';
 import { systemNotification } from '@/lib/systemNotification';
-import { canTriggerAlert, recordAlertTriggered } from '@/lib/alertSettings';
-import { soundAlert } from '@/lib/soundAlert';
-import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList, Layers, User } from 'lucide-react';
+import { canTriggerAlert, recordAlertTriggered, resetAlertTrigger } from '@/lib/alertSettings';
+import { soundAlert, AlertToneId } from '@/lib/soundAlert';
+import {
+  UnifiedAlertItem,
+  EVENT_UNIFIED_ALERTS_CHANGED,
+  EVENT_RANGE_TRADES_CHANGED,
+  EVENT_CHART_ALERTS_CHANGED,
+  EVENT_MARKET_ALERTS_CHANGED,
+  EVENT_OPEN_UNIFIED_ALERTS,
+  emitUnifiedAlertsChanged,
+  openUnifiedAlertsCenter,
+  getUnifiedActiveAlertsCount,
+  listAllActiveMonitoredSymbols,
+  dispatchUnifiedNotification,
+  evaluateBackgroundAlertsForSymbol,
+} from '@/lib/unifiedAlerts';
+import { Calculator, TrendingUp, Palette, Zap, Columns3, Settings, Radio, LayoutList, Layers, User, Bell } from 'lucide-react';
 
 export default function CalculatorPage() {
   // Navigation Tabs: 'calculator' | 'range_master' | 'tracker' | 'watchlist' | 'account_settings'
@@ -85,6 +94,12 @@ export default function CalculatorPage() {
   const [isComparisonOpen, setIsComparisonOpen] = useState(false);
   const [isCalculatorReadOnly, setIsCalculatorReadOnly] = useState(false);
 
+  // Unified Alerts Floating Control Center State
+  const [isUnifiedAlertsOpen, setIsUnifiedAlertsOpen] = useState(false);
+  const [unifiedAlertsTab, setUnifiedAlertsTab] = useState<UnifiedAlertsFilterTab>('all');
+  const [activeAlertsCount, setActiveAlertsCount] = useState<number>(0);
+  const [extraMonitoredSymbols, setExtraMonitoredSymbols] = useState<string[]>([]);
+
   // Default fee settings from localStorage
   const [defaultFees, setDefaultFees] = useState<DefaultFeeSettings>({
     entryFeePercent: '',
@@ -105,18 +120,6 @@ export default function CalculatorPage() {
   const [isTrackerStreamActive, setIsTrackerStreamActive] = useState<boolean>(true);
   const [trackerLivePrices, setTrackerLivePrices] = useState<Record<string, string>>({});
   const trackerWsRef = useRef<WebSocket | null>(null);
-
-  // Scalper Feature State
-  const [scalpTrades, setScalpTrades] = useState<ScalpTrade[]>([]);
-  const [scalperSession, setScalperSession] = useState<ScalperSessionStats>({
-    availableCapitalUsdt: '1000',
-    initialCapitalUsdt: '1000',
-    completedScalps: 0,
-    winningScalps: 0,
-    totalRealizedPnlUsdt: 0,
-    totalRealizedVolumeUsdt: 0,
-    avgDurationMinutes: 0,
-  });
 
   // Watchlist Feature State (Screen #4 TradingView style)
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
@@ -162,32 +165,6 @@ export default function CalculatorPage() {
           }
         }
 
-        // Load scalper trades (فارغة تماماً افتراضياً وبدون أي صفقات أولية مسبقة)
-        const savedScalper = localStorage.getItem(STORAGE_KEY_SCALPER_TRADES);
-        if (savedScalper) {
-          try {
-            const parsed: ScalpTrade[] = JSON.parse(savedScalper);
-            if (Array.isArray(parsed)) {
-              // مسح أي صفقات تجريبية قديمة بدأت بـ scalp_init_
-              const userAddedTrades = parsed.filter((t) => !t.id.startsWith('scalp_init_'));
-              setScalpTrades(userAddedTrades);
-              localStorage.setItem(STORAGE_KEY_SCALPER_TRADES, JSON.stringify(userAddedTrades));
-            } else {
-              setScalpTrades([]);
-            }
-          } catch {
-            setScalpTrades([]);
-          }
-        } else {
-          setScalpTrades([]);
-        }
-
-        // Load scalper session stats
-        const savedSession = localStorage.getItem(STORAGE_KEY_SCALPER_SESSION);
-        if (savedSession) {
-          setScalperSession(JSON.parse(savedSession));
-        }
-
         // Load Watchlist Items (Screen #4 TradingView style)
         const savedWatchlist = localStorage.getItem(STORAGE_KEY_WATCHLIST);
         if (savedWatchlist) {
@@ -207,6 +184,9 @@ export default function CalculatorPage() {
         if (savedStreamState !== null) {
           setIsTrackerStreamActive(savedStreamState === 'true');
         }
+
+        setActiveAlertsCount(getUnifiedActiveAlertsCount());
+        setExtraMonitoredSymbols(listAllActiveMonitoredSymbols());
       } catch {
         // Ignore storage errors in restricted contexts
       }
@@ -233,23 +213,14 @@ export default function CalculatorPage() {
         if (Array.isArray(parsed)) setTrackedCurrencies(parsed);
       }
 
-      const savedScalper = localStorage.getItem(STORAGE_KEY_SCALPER_TRADES);
-      if (savedScalper) {
-        const parsed: ScalpTrade[] = JSON.parse(savedScalper);
-        if (Array.isArray(parsed)) {
-          const userAddedTrades = parsed.filter((t) => !t.id.startsWith('scalp_init_'));
-          setScalpTrades(userAddedTrades);
-        }
-      }
-
-      const savedSession = localStorage.getItem(STORAGE_KEY_SCALPER_SESSION);
-      if (savedSession) setScalperSession(JSON.parse(savedSession));
-
       const savedWatchlist = localStorage.getItem(STORAGE_KEY_WATCHLIST);
       if (savedWatchlist) {
         const parsed: WatchlistItem[] = JSON.parse(savedWatchlist);
         if (Array.isArray(parsed) && parsed.length > 0) setWatchlistItems(parsed);
       }
+
+      setActiveAlertsCount(getUnifiedActiveAlertsCount());
+      setExtraMonitoredSymbols(listAllActiveMonitoredSymbols());
     } catch (e) {
       console.warn('Error reloading from storage:', e);
     }
@@ -268,9 +239,50 @@ export default function CalculatorPage() {
       reloadAllFromStorage();
     };
 
+    const handleUnifiedAlertsSync = (e: Event) => {
+      const customEvt = e as CustomEvent<{ source?: string }>;
+      setActiveAlertsCount(getUnifiedActiveAlertsCount());
+      setExtraMonitoredSymbols(listAllActiveMonitoredSymbols());
+      if (customEvt?.detail?.source === 'watchlist' || !customEvt?.detail?.source) {
+        try {
+          const rawWl = localStorage.getItem(STORAGE_KEY_WATCHLIST);
+          if (rawWl) {
+            const parsedWl: WatchlistItem[] = JSON.parse(rawWl);
+            if (Array.isArray(parsedWl)) setWatchlistItems(parsedWl);
+          }
+        } catch {}
+      }
+      if (customEvt?.detail?.source === 'calculator' || !customEvt?.detail?.source) {
+        try {
+          const rawCurr = localStorage.getItem(STORAGE_KEY_CURRENCIES);
+          if (rawCurr) {
+            const parsedCurr: CurrencyItem[] = JSON.parse(rawCurr);
+            if (Array.isArray(parsedCurr)) setCurrencies(parsedCurr.slice(0, MAX_CURRENCIES));
+          }
+        } catch {}
+      }
+    };
+
+    const handleOpenUnified = (e: Event) => {
+      const customEvt = e as CustomEvent<{ tab?: UnifiedAlertsFilterTab }>;
+      setUnifiedAlertsTab(customEvt?.detail?.tab || 'all');
+      setIsUnifiedAlertsOpen(true);
+    };
+
     window.addEventListener(EVENT_DATA_RESTORED, handleDataRestored);
+    window.addEventListener(EVENT_UNIFIED_ALERTS_CHANGED, handleUnifiedAlertsSync);
+    window.addEventListener(EVENT_RANGE_TRADES_CHANGED, handleUnifiedAlertsSync);
+    window.addEventListener(EVENT_CHART_ALERTS_CHANGED, handleUnifiedAlertsSync);
+    window.addEventListener(EVENT_MARKET_ALERTS_CHANGED, handleUnifiedAlertsSync);
+    window.addEventListener(EVENT_OPEN_UNIFIED_ALERTS, handleOpenUnified);
+
     return () => {
       window.removeEventListener(EVENT_DATA_RESTORED, handleDataRestored);
+      window.removeEventListener(EVENT_UNIFIED_ALERTS_CHANGED, handleUnifiedAlertsSync);
+      window.removeEventListener(EVENT_RANGE_TRADES_CHANGED, handleUnifiedAlertsSync);
+      window.removeEventListener(EVENT_CHART_ALERTS_CHANGED, handleUnifiedAlertsSync);
+      window.removeEventListener(EVENT_MARKET_ALERTS_CHANGED, handleUnifiedAlertsSync);
+      window.removeEventListener(EVENT_OPEN_UNIFIED_ALERTS, handleOpenUnified);
     };
   }, [reloadAllFromStorage]);
 
@@ -278,6 +290,8 @@ export default function CalculatorPage() {
   const persistCurrencies = useCallback((items: CurrencyItem[]) => {
     try {
       localStorage.setItem(STORAGE_KEY_CURRENCIES, JSON.stringify(items));
+      setActiveAlertsCount(getUnifiedActiveAlertsCount());
+      setExtraMonitoredSymbols(listAllActiveMonitoredSymbols());
     } catch {
       // Ignore
     }
@@ -292,28 +306,12 @@ export default function CalculatorPage() {
     }
   }, []);
 
-  // Helper to persist scalper trades
-  const persistScalpTrades = useCallback((items: ScalpTrade[]) => {
-    try {
-      localStorage.setItem(STORAGE_KEY_SCALPER_TRADES, JSON.stringify(items));
-    } catch {
-      // Ignore
-    }
-  }, []);
-
-  // Helper to persist scalper session
-  const persistScalperSession = useCallback((stats: ScalperSessionStats) => {
-    try {
-      localStorage.setItem(STORAGE_KEY_SCALPER_SESSION, JSON.stringify(stats));
-    } catch {
-      // Ignore
-    }
-  }, []);
-
   // Helper to persist watchlist items
   const persistWatchlistItems = useCallback((items: WatchlistItem[]) => {
     try {
       localStorage.setItem(STORAGE_KEY_WATCHLIST, JSON.stringify(items));
+      setActiveAlertsCount(getUnifiedActiveAlertsCount());
+      setExtraMonitoredSymbols(listAllActiveMonitoredSymbols());
     } catch {
       // Ignore
     }
@@ -788,16 +786,6 @@ export default function CalculatorPage() {
     persistTrackedCurrenciesRef.current = persistTrackedCurrencies;
   }, [persistTrackedCurrencies]);
 
-  const persistScalpTradesRef = useRef(persistScalpTrades);
-  useEffect(() => {
-    persistScalpTradesRef.current = persistScalpTrades;
-  }, [persistScalpTrades]);
-
-  const persistScalperSessionRef = useRef(persistScalperSession);
-  useEffect(() => {
-    persistScalperSessionRef.current = persistScalperSession;
-  }, [persistScalperSession]);
-
   const persistWatchlistItemsRef = useRef(persistWatchlistItems);
   useEffect(() => {
     persistWatchlistItemsRef.current = persistWatchlistItems;
@@ -828,11 +816,10 @@ export default function CalculatorPage() {
   // Determine active coin for dynamic Binance deep link
   const currentActiveSymbolName = useMemo(() => {
     if (activeCurrency?.name) return activeCurrency.name;
-    if (scalpTrades.length > 0 && scalpTrades[0].name) return scalpTrades[0].name;
     if (trackedCurrencies.length > 0 && trackedCurrencies[0].name) return trackedCurrencies[0].name;
     if (rangeStreamSymbols.length > 0) return rangeStreamSymbols[0].replace('USDT', '');
     return 'BTC';
-  }, [activeCurrency, scalpTrades, trackedCurrencies, rangeStreamSymbols]);
+  }, [activeCurrency, trackedCurrencies, rangeStreamSymbols]);
 
   // Market volatility direction for top bar sessions
   const marketVolatilityDirection = useMemo((): 'up' | 'down' | 'neutral' => {
@@ -846,38 +833,38 @@ export default function CalculatorPage() {
     return 'up';
   }, [trackerLivePrices, trackedCurrencies]);
 
-  // Apply Binance wallet balance to Scalper Session Capital
+  // Apply Binance wallet balance to Range Master suggested trade capital
   const handleApplyBinanceBalanceToCapital = useCallback((balance: number) => {
     const balanceStr = balance.toFixed(2);
-    setScalperSession((prev) => {
-      const updated = {
-        ...prev,
-        availableCapitalUsdt: balanceStr,
-        initialCapitalUsdt: balanceStr,
-      };
-      persistScalperSessionRef.current(updated);
-      return updated;
-    });
+    try {
+      const existing = localStorage.getItem(STORAGE_KEY_RANGE_LAST_STATE);
+      const parsed = existing ? JSON.parse(existing) : {};
+      localStorage.setItem(
+        STORAGE_KEY_RANGE_LAST_STATE,
+        JSON.stringify({ ...parsed, tradeCapitalInput: balanceStr })
+      );
+      window.dispatchEvent(new CustomEvent(EVENT_RANGE_TRADES_CHANGED));
+    } catch {}
     systemNotification.sendNotification({
       title: '💼 تم تحديث رأس المال من بينانس!',
-      body: `تم تعيين رصيدك المتاح (${balanceStr} USDT) بنجاح كرأس مال للسكالبينج.`,
+      body: `تم تعيين رصيدك المتاح (${balanceStr} USDT) كرأس مال مقترح في صائد القيعان.`,
       tag: 'binance-wallet-sync',
       icon: '/pwa-192x192.png',
       badge: '/icon.svg',
     });
   }, []);
 
-  // Combined symbols key for WebSocket (Tracker + Scalper + Watchlist + Range Master)
+  // Combined symbols key for WebSocket (Tracker + Watchlist + Range Master + Chart Lines + Active Calculator Monitors)
   const trackedSymbolsKey = useMemo(() => {
     if (!isTrackerStreamActive) return '';
     const tr = trackedCurrencies.map((tc) => tc.binanceSymbol.toLowerCase());
-    const sc = scalpTrades.map((st) => st.binanceSymbol.toLowerCase());
     const wl = watchlistItems.map((wi) => wi.symbol.toLowerCase());
     const rg = rangeStreamSymbols.map((s) => s.toLowerCase());
-    const combined = Array.from(new Set([...tr, ...sc, ...wl, ...rg]));
+    const ex = extraMonitoredSymbols.map((s) => s.toLowerCase());
+    const combined = Array.from(new Set([...tr, ...wl, ...rg, ...ex])).filter(Boolean);
     if (combined.length === 0) return '';
     return combined.sort().join('/');
-  }, [isTrackerStreamActive, trackedCurrencies, scalpTrades, watchlistItems, rangeStreamSymbols]);
+  }, [isTrackerStreamActive, trackedCurrencies, watchlistItems, rangeStreamSymbols, extraMonitoredSymbols]);
 
   // Unified Price Update Processor (for both WebSocket and Background Web Worker)
   const processPriceUpdate = useCallback((symbol: string, price: string) => {
@@ -930,103 +917,8 @@ export default function CalculatorPage() {
       return prev;
     });
 
-    // 2. Update Scalper Trades: Dip Tracking for Watching, Peak Tracking for In-Trade, and real-time Price History
-    setScalpTrades((prev) => {
-      let hasChanges = false;
-      const next = prev.map((st) => {
-        if (st.binanceSymbol === symbol) {
-          const prevHistory = st.priceHistory || [];
-          const lastRecorded = prevHistory.length > 0 ? prevHistory[prevHistory.length - 1] : null;
-          let newHistory = prevHistory;
-          if (lastRecorded !== priceNum) {
-            newHistory = [...prevHistory, priceNum].slice(-25);
-            hasChanges = true;
-          }
-
-          if (st.status === 'watching') {
-            const currentDip = st.dipPrice ? parseFloat(st.dipPrice) : priceNum;
-            if (!st.dipPrice || priceNum < currentDip) {
-              hasChanges = true;
-              return {
-                ...st,
-                priceHistory: newHistory,
-                dipPrice: price,
-                dipTimestamp: Date.now(),
-              };
-            }
-
-            // Check for confirmed bounce above dip
-            if (currentDip > 0 && st.isActive !== false && st.alertsEnabled === true) {
-              const bouncePercent = ((priceNum - currentDip) / currentDip) * 100;
-              if (bouncePercent >= (st.bounceTriggerPercent || 0.4)) {
-                if (canTriggerAlert('reboundBounce', st.id)) {
-                  recordAlertTriggered('reboundBounce', st.id);
-                  soundAlert.playTone('celebration');
-                  systemNotification.sendNotification({
-                    title: `⚡ ارتداد جاهز للشراء (${st.name})!`,
-                    body: `ارتد سعر ${st.name} بنسبة +${bouncePercent.toFixed(2)}% فوق القاع (${currentDip} USDT). جاهز لسكالبينج سريع!`,
-                    tag: `bounce-${st.id}`,
-                    icon: '/pwa-192x192.png',
-                    badge: '/icon.svg',
-                    renotify: true,
-                  });
-                }
-              }
-            }
-
-            if (hasChanges) {
-              return { ...st, priceHistory: newHistory };
-            }
-          } else if (st.status === 'in_trade') {
-            const entryNum = st.entryPrice ? parseFloat(st.entryPrice) : priceNum;
-            const currentPeak = st.peakSinceEntry ? parseFloat(st.peakSinceEntry) : entryNum;
-            if (priceNum > currentPeak) {
-              hasChanges = true;
-              return {
-                ...st,
-                priceHistory: newHistory,
-                peakSinceEntry: price,
-                peakTimestamp: Date.now(),
-              };
-            }
-
-            // Trailing drop warning check
-            if (entryNum > 0 && currentPeak > entryNum && st.isActive !== false && st.alertsEnabled === true) {
-              const peakPnl = ((currentPeak - entryNum) / entryNum) * 100;
-              const dropFromPeak = ((currentPeak - priceNum) / currentPeak) * 100;
-              if (peakPnl >= 0.5 && dropFromPeak >= (st.trailingDropAlertPercent || 0.35)) {
-                if (canTriggerAlert('targetExit', st.id)) {
-                  recordAlertTriggered('targetExit', st.id);
-                  soundAlert.playTone('radar');
-                  systemNotification.sendNotification({
-                    title: `⚠️ تحذير هبوط من القمة (${st.name})!`,
-                    body: `هبط سعر ${st.name} بنسبة -${dropFromPeak.toFixed(2)}% عن أعلى قمة (${currentPeak} USDT). يُنصح بالخروج السريع لـ USDT!`,
-                    tag: `trailing-${st.id}`,
-                    icon: '/pwa-192x192.png',
-                    badge: '/icon.svg',
-                    renotify: true,
-                    requireInteraction: true,
-                  });
-                }
-              }
-            }
-
-            if (hasChanges) {
-              return { ...st, priceHistory: newHistory };
-            }
-          } else if (hasChanges) {
-            return { ...st, priceHistory: newHistory };
-          }
-        }
-        return st;
-      });
-
-      if (hasChanges) {
-        persistScalpTradesRef.current(next);
-        return next;
-      }
-      return prev;
-    });
+    // 2. Unified Background Alert Evaluator (Range Master + Calculator + Chart Lines & Exit Targets)
+    evaluateBackgroundAlertsForSymbol(symbol, priceNum);
 
     // 3. Update Watchlist and Trigger Instant Price Alerts (مع الحفاظ الدائم على التنبيه نشطاً ومحفوظاً)
     setWatchlistItems((prev) => {
@@ -1042,18 +934,16 @@ export default function CalculatorPage() {
 
             if (isTriggered) {
               const alertKey = `wl_${item.id}`;
-              if (canTriggerAlert('targetExit', alertKey)) {
+              const repeatMode = item.alertRepeatMode || 'once';
+              const intervalSec = item.alertIntervalSeconds || 60;
+              if (canTriggerAlert('targetExit', alertKey, repeatMode, intervalSec)) {
                 recordAlertTriggered('targetExit', alertKey);
                 hasAlertFired = true;
-                soundAlert.playTone('bell');
-                systemNotification.sendNotification({
+                dispatchUnifiedNotification({
                   title: `🎯 تنبيه سعري فوري (${item.name})!`,
                   body: `وصل سعر ${item.name} إلى ${priceNum} USDT (المستهدف: ${targetNum} USDT).`,
                   tag: `wl-alert-${item.id}`,
-                  icon: '/pwa-192x192.png',
-                  badge: '/icon.svg',
-                  renotify: true,
-                  requireInteraction: true,
+                  toneId: (item.alertToneId as AlertToneId) || 'bell',
                 });
               }
 
@@ -1132,20 +1022,15 @@ export default function CalculatorPage() {
     if (typeof window === 'undefined' || !isTrackerStreamActive) return;
 
     const tr = trackedCurrencies.map((tc) => tc.binanceSymbol.toUpperCase());
-    const sc = scalpTrades.map((st) => st.binanceSymbol.toUpperCase());
     const wl = watchlistItems.map((wi) => wi.symbol.toUpperCase());
     const rg = rangeStreamSymbols.map((s) => s.toUpperCase());
-    const symbolsList = Array.from(new Set([...tr, ...sc, ...wl, ...rg])).filter(Boolean);
+    const ex = extraMonitoredSymbols.map((s) => s.toUpperCase());
+    const symbolsList = Array.from(new Set([...tr, ...wl, ...rg, ...ex])).filter(Boolean);
 
     if (symbolsList.length === 0) return;
 
-    // Check if any alerts are active to activate background keep-alive
-    const hasActiveAlerts = 
-      watchlistItems.some((wi) => wi.hasAlert && wi.alertPrice) ||
-      scalpTrades.some((st) => st.isActive !== false && st.alertsEnabled) ||
-      currencies.some((c) => c.isMonitoringActive && c.targetPrice);
-
-    if (hasActiveAlerts) {
+    // Check if any unified alert is active to activate background keep-alive
+    if (activeAlertsCount > 0) {
       soundAlert.enableBackgroundKeepAlive();
     }
 
@@ -1179,227 +1064,28 @@ export default function CalculatorPage() {
         bgWorkerRef.current.postMessage({ type: 'STOP_MONITORING' });
       }
     };
-  }, [isTrackerStreamActive, trackedCurrencies, scalpTrades, watchlistItems, rangeStreamSymbols, currencies, processPriceUpdate]);
+  }, [isTrackerStreamActive, trackedCurrencies, watchlistItems, rangeStreamSymbols, extraMonitoredSymbols, activeAlertsCount, processPriceUpdate]);
 
   // Keep background monitoring alive when screen locks or tab changes visibility
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
     const handleVisibilityChange = () => {
-      const hasActiveAlerts = 
-        watchlistItems.some((wi) => wi.hasAlert && wi.alertPrice) ||
-        scalpTrades.some((st) => st.isActive !== false && st.alertsEnabled) ||
-        currencies.some((c) => c.isMonitoringActive && c.targetPrice);
-
-      if (hasActiveAlerts) {
+      if (activeAlertsCount > 0) {
         soundAlert.enableBackgroundKeepAlive();
       }
 
       if (document.visibilityState === 'visible') {
-        // Returned to foreground: ensure WebSocket is refreshed if needed
         if (isTrackerStreamActive && trackerWsRef.current && trackerWsRef.current.readyState !== WebSocket.OPEN) {
-          // Reconnect happens automatically via state trigger
+          // WebSocket reconnects smoothly on symbol key or stream updates
         }
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [watchlistItems, scalpTrades, currencies, isTrackerStreamActive]);
+  }, [activeAlertsCount, isTrackerStreamActive]);
 
-  // ----------------------------------------------------
-  // SCALPER ACTIONS & HANDLERS
-  // ----------------------------------------------------
-
-  const handleAddScalpTrade = (name: string) => {
-    const clean = name.trim().toUpperCase();
-    const pair = clean.endsWith('USDT') ? clean : `${clean}USDT`;
-    const liveP = trackerLivePrices[pair] || '';
-    const newTrade: ScalpTrade = {
-      id: `scalp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      name: clean,
-      binanceSymbol: pair,
-      status: 'watching',
-      isActive: true,
-      alertsEnabled: false, // مضبوط افتراضياً على وضع "مغلق" كما طلب المستخدم
-      dipPrice: liveP || undefined,
-      dipTimestamp: liveP ? Date.now() : undefined,
-      bounceTriggerPercent: 0.4,
-      trailingDropAlertPercent: 0.35,
-      target1Percent: 0.6,
-      target2Percent: 1.2,
-      target3Percent: 2.0,
-      createdAt: Date.now(),
-      notes: '',
-    };
-    const next = [newTrade, ...scalpTrades];
-    setScalpTrades(next);
-    persistScalpTrades(next);
-  };
-
-  const handleUpdateScalpTrade = (updated: ScalpTrade) => {
-    const next = scalpTrades.map((t) => (t.id === updated.id ? updated : t));
-    setScalpTrades(next);
-    persistScalpTrades(next);
-  };
-
-  const handleDeleteScalpTrade = (tradeId: string) => {
-    const next = scalpTrades.filter((t) => t.id !== tradeId);
-    setScalpTrades(next);
-    persistScalpTrades(next);
-  };
-
-  const handleToggleScalpTradeActive = (tradeId: string) => {
-    const next = scalpTrades.map((t) => {
-      if (t.id === tradeId) {
-        return { ...t, isActive: t.isActive === false ? true : false };
-      }
-      return t;
-    });
-    setScalpTrades(next);
-    persistScalpTrades(next);
-  };
-
-  const handleToggleScalpTradeAlerts = (tradeId: string) => {
-    const next = scalpTrades.map((t) => {
-      if (t.id === tradeId) {
-        return { ...t, alertsEnabled: !t.alertsEnabled };
-      }
-      return t;
-    });
-    setScalpTrades(next);
-    persistScalpTrades(next);
-  };
-
-  const handleClearAllScalpTrades = () => {
-    setScalpTrades([]);
-    persistScalpTrades([]);
-  };
-
-  const handleOpenScalpTrade = (tradeId: string, entryPrice: string, amountUsdt: string, coinQuantity?: string) => {
-    const entryNum = parseFloat(entryPrice);
-    const buyFee = parseFloat(defaultFees.entryFeePercent || '0.1') || 0.1;
-    const sellFee = parseFloat(defaultFees.exitFeePercent || '0.1') || 0.1;
-    const bePrice = entryNum > 0 ? (entryNum * (1 + buyFee / 100)) / (1 - sellFee / 100) : 0;
-
-    const next = scalpTrades.map((t) => {
-      if (t.id === tradeId) {
-        return {
-          ...t,
-          status: 'in_trade' as const,
-          entryPrice,
-          allocatedUsdt: amountUsdt,
-          coinQuantity: coinQuantity || undefined,
-          entryTimestamp: Date.now(),
-          breakEvenPrice: bePrice > 0 ? bePrice.toString() : undefined,
-          peakSinceEntry: entryPrice,
-          peakTimestamp: Date.now(),
-        };
-      }
-      return t;
-    });
-    setScalpTrades(next);
-    persistScalpTrades(next);
-  };
-
-  const handleCloseScalpTradeToUsdt = (tradeId: string, exitPrice: string, reason: ScalpTrade['exitReason']) => {
-    const trade = scalpTrades.find((t) => t.id === tradeId);
-    if (!trade || !trade.entryPrice) return;
-
-    const entryNum = parseFloat(trade.entryPrice);
-    const exitNum = parseFloat(exitPrice);
-    const amount = trade.allocatedUsdt ? parseFloat(trade.allocatedUsdt) : 100;
-    const qty = trade.coinQuantity ? parseFloat(trade.coinQuantity) : (entryNum > 0 ? amount / entryNum : 0);
-
-    const diff = exitNum - entryNum;
-    const pnlPercent = entryNum > 0 ? (diff / entryNum) * 100 : 0;
-    const pnlUsdt = diff * qty;
-
-    const durationMinutes = trade.entryTimestamp 
-      ? Math.max(1, Math.round((Date.now() - trade.entryTimestamp) / 60000)) 
-      : 1;
-
-    // Update Session Stats
-    const newCompleted = scalperSession.completedScalps + 1;
-    const newWinning = scalperSession.winningScalps + (pnlUsdt > 0 ? 1 : 0);
-    const newTotalPnl = scalperSession.totalRealizedPnlUsdt + pnlUsdt;
-    const newAvgDuration = Math.round(
-      (scalperSession.avgDurationMinutes * scalperSession.completedScalps + durationMinutes) / newCompleted
-    );
-
-    const updatedSession: ScalperSessionStats = {
-      ...scalperSession,
-      completedScalps: newCompleted,
-      winningScalps: newWinning,
-      totalRealizedPnlUsdt: newTotalPnl,
-      avgDurationMinutes: newAvgDuration,
-    };
-    setScalperSession(updatedSession);
-    persistScalperSession(updatedSession);
-
-    // Update Trade Record
-    const next = scalpTrades.map((t) => {
-      if (t.id === tradeId) {
-        return {
-          ...t,
-          status: 'closed' as const,
-          exitPrice,
-          exitTimestamp: Date.now(),
-          realizedPnlUsdt: pnlUsdt,
-          realizedPnlPercent: pnlPercent,
-          exitReason: reason,
-          holdingDurationMinutes: durationMinutes,
-        };
-      }
-      return t;
-    });
-    setScalpTrades(next);
-    persistScalpTrades(next);
-  };
-
-  const handleUpdateScalperSession = (stats: ScalperSessionStats) => {
-    setScalperSession(stats);
-    persistScalperSession(stats);
-  };
-
-  const handleNavigateToCalculatorFromScalp = (trade?: ScalpTrade) => {
-    if (trade && trade.name) {
-      handleOpenCalculatorForCurrency(trade.name, trade.coinQuantity);
-      if (trade.entryPrice) {
-        setCurrencies((prev) => {
-          const next = prev.map((c) => {
-            if (c.name === trade.name.trim().toUpperCase()) {
-              return { 
-                ...c, 
-                entryPrice: trade.entryPrice!,
-                tradeAmount: trade.allocatedUsdt || c.tradeAmount,
-                coinQuantity: trade.coinQuantity || c.coinQuantity
-              };
-            }
-            return c;
-          });
-          persistCurrencies(next);
-          return next;
-        });
-      }
-    }
-    setActiveMainTab('calculator');
-  };
-
-  const handleNavigateToTrackerFromScalp = (symbol?: string) => {
-    if (symbol) {
-      const clean = symbol.trim().toUpperCase();
-      const match = trackedCurrencies.find((tc) => tc.name === clean);
-      if (match) {
-        setActiveTrackedId(match.id);
-      } else {
-        const pair = clean.endsWith('USDT') ? clean : `${clean}USDT`;
-        const liveP = trackerLivePrices[pair] || '0';
-        handleAddTrackedCurrency(clean, liveP);
-      }
-    }
-    setActiveMainTab('tracker');
-  };
 
   // ----------------------------------------------------
   // WATCHLIST ACTIONS & HANDLERS (Screen #4 TradingView)
@@ -1439,19 +1125,24 @@ export default function CalculatorPage() {
   };
 
   const handleSetWatchlistAlert = (symbol: string, targetPrice: string, direction: 'above' | 'below') => {
-    const next = watchlistItems.map((item) => {
-      if (item.symbol === symbol) {
-        return {
-          ...item,
-          hasAlert: true,
-          alertPrice: targetPrice,
-          alertDirection: direction,
-        };
-      }
-      return item;
+    setWatchlistItems((prev) => {
+      const next = prev.map((item) => {
+        if (item.symbol === symbol) {
+          resetAlertTrigger('targetExit', `wl_${item.id}`);
+          return {
+            ...item,
+            hasAlert: true,
+            alertPrice: targetPrice,
+            alertDirection: direction,
+          };
+        }
+        return item;
+      });
+      persistWatchlistItems(next);
+      return next;
     });
-    setWatchlistItems(next);
-    persistWatchlistItems(next);
+    emitUnifiedAlertsChanged('watchlist');
+    soundAlert.enableBackgroundKeepAlive();
 
     // Request system push notification permission
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
@@ -1479,12 +1170,20 @@ export default function CalculatorPage() {
   }) => {
     const upper = (item.name || item.symbol.replace('USDT', '')).trim().toUpperCase();
     const matchedCalc = currencies.find((c) => c.name === upper);
-    const matchedScalp = scalpTrades.find((s) => s.name === upper);
 
-    const entry = item.entryPrice || matchedCalc?.entryPrice || matchedScalp?.entryPrice || '';
+    let matchedRange: RangeTrackedTrade | undefined;
+    try {
+      const rawRange = localStorage.getItem(STORAGE_KEY_RANGE_TRADES);
+      if (rawRange) {
+        const parsed: RangeTrackedTrade[] = JSON.parse(rawRange);
+        matchedRange = parsed.find((r) => r.name === upper && r.status !== 'closed');
+      }
+    } catch {}
+
+    const entry = item.entryPrice || matchedCalc?.entryPrice || matchedRange?.entryPrice?.toString() || '';
     let be = item.breakEvenPrice || '';
-    const qty = item.coinQuantity || matchedCalc?.coinQuantity || matchedScalp?.coinQuantity || '';
-    const amt = item.tradeAmount || matchedCalc?.tradeAmount || matchedScalp?.allocatedUsdt || '';
+    const qty = item.coinQuantity || matchedCalc?.coinQuantity || (matchedRange?.coinQuantity ? String(matchedRange.coinQuantity) : '');
+    const amt = item.tradeAmount || matchedCalc?.tradeAmount || (matchedRange?.allocatedUsdt ? String(matchedRange.allocatedUsdt) : '');
 
     if (!be && entry) {
       const pNum = parseFloat(entry);
@@ -1509,7 +1208,27 @@ export default function CalculatorPage() {
       testPrices: tPrices,
       testPriceTimestamps: tTimestamps,
     });
-  }, [currencies, scalpTrades, defaultFees]);
+  }, [currencies, defaultFees]);
+
+  const handleNavigateFromUnifiedAlert = useCallback((item: UnifiedAlertItem) => {
+    if (item.source === 'watchlist') {
+      setActiveMainTab('watchlist');
+    } else if (item.source === 'range_master') {
+      setActiveMainTab('range_master');
+    } else if (item.source === 'calculator') {
+      if (item.meta?.currencyId) {
+        setActiveCurrencyId(item.meta.currencyId);
+      }
+      setActiveMainTab('calculator');
+    } else if (item.source === 'chart_lines' && item.meta?.chartSymbol) {
+      handleOpenChartForCurrency({
+        symbol: item.meta.chartSymbol,
+        name: item.displayName,
+      });
+    } else if (item.source === 'market_sessions') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [handleOpenChartForCurrency]);
 
   return (
     <main className="relative min-h-screen w-full flex flex-col justify-start items-center p-3 sm:p-6 pb-28 sm:pb-32 overflow-x-clip transition-colors">
@@ -1569,6 +1288,28 @@ export default function CalculatorPage() {
 
         {/* Top Action Controls */}
         <div className="flex items-center flex-wrap gap-2">
+          {/* Unified Alerts Control Center Trigger */}
+          <button
+            type="button"
+            onClick={() => openUnifiedAlertsCenter('all')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+              activeAlertsCount > 0
+                ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+            }`}
+            title="فتح مركز تحكم التنبيهات الموحد"
+          >
+            <Bell className="w-4 h-4" />
+            <span>التنبيهات</span>
+            <span className={`text-[10px] font-mono tabular-nums px-1.5 py-0.2 rounded-full font-bold ${
+              activeAlertsCount > 0
+                ? 'bg-slate-950 text-amber-400'
+                : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+            }`}>
+              {activeAlertsCount}
+            </span>
+          </button>
+
           {/* Side-by-Side Break-Even Comparison Drawer Trigger */}
           <button
             type="button"
@@ -1677,13 +1418,53 @@ export default function CalculatorPage() {
               <LiveMonitoringSection
                 currencyName={activeCurrency.name}
                 binanceSymbol={activeCurrency.binanceSymbol}
-                onChangeBinanceSymbol={(sym) => updateActiveCurrency({ binanceSymbol: sym })}
+                onChangeBinanceSymbol={(sym) => {
+                  updateActiveCurrency({ binanceSymbol: sym });
+                  emitUnifiedAlertsChanged('calculator');
+                }}
                 isActive={Boolean(activeCurrency.isMonitoringActive)}
-                onToggleActive={(active) => updateActiveCurrency({ isMonitoringActive: active })}
+                onToggleActive={(active) => {
+                  const cleanName = activeCurrency.name.trim().toUpperCase();
+                  const pair = activeCurrency.binanceSymbol
+                    ? activeCurrency.binanceSymbol.toUpperCase()
+                    : cleanName.endsWith('USDT')
+                    ? cleanName
+                    : `${cleanName}USDT`;
+                  if (active) resetAlertTrigger('targetExit', pair);
+                  updateActiveCurrency({ isMonitoringActive: active });
+                  emitUnifiedAlertsChanged('calculator');
+                }}
                 targetPrice={activeCurrency.targetPrice || ''}
-                onChangeTargetPrice={(price) => updateActiveCurrency({ targetPrice: price })}
+                onChangeTargetPrice={(price) => {
+                  const cleanName = activeCurrency.name.trim().toUpperCase();
+                  const pair = activeCurrency.binanceSymbol
+                    ? activeCurrency.binanceSymbol.toUpperCase()
+                    : cleanName.endsWith('USDT')
+                    ? cleanName
+                    : `${cleanName}USDT`;
+                  resetAlertTrigger('targetExit', pair);
+                  updateActiveCurrency({ targetPrice: price });
+                  emitUnifiedAlertsChanged('calculator');
+                }}
                 targetDirection={activeCurrency.targetDirection || 'above'}
-                onChangeTargetDirection={(dir) => updateActiveCurrency({ targetDirection: dir })}
+                onChangeTargetDirection={(dir) => {
+                  const cleanName = activeCurrency.name.trim().toUpperCase();
+                  const pair = activeCurrency.binanceSymbol
+                    ? activeCurrency.binanceSymbol.toUpperCase()
+                    : cleanName.endsWith('USDT')
+                    ? cleanName
+                    : `${cleanName}USDT`;
+                  resetAlertTrigger('targetExit', pair);
+                  updateActiveCurrency({ targetDirection: dir });
+                  emitUnifiedAlertsChanged('calculator');
+                }}
+                alertRepeatMode={activeCurrency.alertRepeatMode || 'once'}
+                alertIntervalSeconds={activeCurrency.alertIntervalSeconds || 60}
+                alertToneId={activeCurrency.alertToneId as AlertToneId | undefined}
+                onChangeAlertToneId={(tone) => {
+                  updateActiveCurrency({ alertToneId: tone });
+                  emitUnifiedAlertsChanged('calculator');
+                }}
                 onApplyPriceAsEntry={handleApplyLivePriceAsEntry}
                 onAddPriceAsTest={handleAddLivePriceAsTest}
                 breakEvenPrice={
@@ -1850,11 +1631,16 @@ export default function CalculatorPage() {
             livePrices={trackerLivePrices}
             isLiveStreamActive={isTrackerStreamActive}
             currencies={currencies}
-            scalpTrades={scalpTrades}
             onToggleLiveStream={handleToggleTrackerStream}
-            onUpdateWatchlistItem={handleUpdateWatchlistItem}
+            onUpdateWatchlistItem={(item) => {
+              handleUpdateWatchlistItem(item);
+              emitUnifiedAlertsChanged('watchlist');
+            }}
             onAddWatchlistItem={handleAddWatchlistItem}
-            onDeleteWatchlistItem={handleDeleteWatchlistItem}
+            onDeleteWatchlistItem={(id) => {
+              handleDeleteWatchlistItem(id);
+              emitUnifiedAlertsChanged('watchlist');
+            }}
             onReorderWatchlistItems={handleReorderWatchlistItems}
             onOpenChart={(item) => handleOpenChartForCurrency(item)}
             onNavigateToCalculator={(coinName) => handleOpenCalculatorForCurrency(coinName)}
@@ -1874,6 +1660,15 @@ export default function CalculatorPage() {
         )}
 
       </div>
+
+      {/* Unified Floating Alerts Control Center Modal */}
+      <UnifiedAlertsModal
+        isOpen={isUnifiedAlertsOpen}
+        initialTab={unifiedAlertsTab}
+        livePrices={trackerLivePrices}
+        onClose={() => setIsUnifiedAlertsOpen(false)}
+        onNavigateToSource={handleNavigateFromUnifiedAlert}
+      />
 
       {/* Settings Modal */}
       <SettingsModal

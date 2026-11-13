@@ -20,6 +20,9 @@ export interface CurrencyItem {
   binanceSymbol?: string;
   targetPrice?: string;
   targetDirection?: 'above' | 'below';
+  alertRepeatMode?: 'once' | 'continuous';
+  alertIntervalSeconds?: number;
+  alertToneId?: string;
   // Fee calculation method (تراكمي أو منفصل)
   feeMethod?: FeeCalculationMethod;
 }

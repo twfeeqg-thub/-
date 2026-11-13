@@ -1,24 +1,25 @@
 /**
- * نظام إدارة إعدادات وتخصيص التنبيهات الموحد لكافة أجزاء التطبيق
- * جميع التنبيهات مغلقة افتراضياً (Default: OFF) وفق طلب المستخدم
+ * نظام إدارة سجل وتكرار التنبيهات الموحد لكافة أجزاء التطبيق
+ * تم إلغاء الأقفال العامة المخفية (Hidden Global Locks) بناءً على طلب المستخدم:
+ * تفعيل التنبيه من أي شاشة يفعّله مباشرة في المركز الموحد بدون قفل سري يعطله.
  */
 
-export type AlertTypeId = 
-  | 'bottomDetection'   // تنبيه رصد القاع
-  | 'reboundBounce'     // تنبيه تأكيد الارتداد
-  | 'targetExit'        // تنبيه وصول السعر للمستهدف أو الخروج
-  | 'chartLines'        // تنبيه خطوط الشارت المرسومة
-  | 'trailingPeak'      // تنبيه تراجع القمة لتأمين الأرباح
-  | 'breakEvenStop';    // تنبيه كسر التعادل ووقف الخسارة
+export type AlertTypeId =
+  | 'bottomDetection'
+  | 'reboundBounce'
+  | 'targetExit'
+  | 'chartLines'
+  | 'trailingPeak'
+  | 'breakEvenStop';
 
 export interface SingleAlertConfig {
   id: AlertTypeId;
   name: string;
   description: string;
   iconName: string;
-  enabled: boolean;                  // الوضع الافتراضي مغلق (false)
-  repeatMode: 'once' | 'continuous'; // 'once' (مرة واحدة) أو 'continuous' (باستمرار)
-  intervalSeconds: number;           // الفاصل الزمني للتكرار بالثواني (افتراضي: 60)
+  enabled: boolean;
+  repeatMode: 'once' | 'continuous';
+  intervalSeconds: number;
 }
 
 export type AppAlertSettings = Record<AlertTypeId, SingleAlertConfig>;
@@ -27,54 +28,54 @@ export const DEFAULT_ALERT_SETTINGS: AppAlertSettings = {
   bottomDetection: {
     id: 'bottomDetection',
     name: 'تنبيه رصد القاع',
-    description: 'إصدار تنبيه صوتي وإشعار عند تسجيل العملة لقاع أدنى جديد في رادار الرصد',
+    description: 'إصدار تنبيه صوتي وإشعار عند تسجيل العملة لقاع مستهدف في صائد القيعان',
     iconName: 'TrendingDown',
-    enabled: false, // مغلق افتراضياً
+    enabled: true,
     repeatMode: 'once',
     intervalSeconds: 60,
   },
   reboundBounce: {
     id: 'reboundBounce',
     name: 'تنبيه تأكيد الارتداد',
-    description: 'تنبيه عند ارتداد السعر صعوداً بنسبة مؤكدة فوق القاع الأخير لاقتناص الفرصة',
+    description: 'تنبيه عند ارتداد السعر صعوداً بنسبة مؤكدة فوق القاع الأخير',
     iconName: 'Zap',
-    enabled: false, // مغلق افتراضياً
+    enabled: true,
     repeatMode: 'once',
     intervalSeconds: 60,
   },
   targetExit: {
     id: 'targetExit',
     name: 'تنبيه المستهدف وسعر الخروج',
-    description: 'تنبيه فوري عند وصول السعر إلى المستهدف المحدد أو هدف الخروج من الصفقة',
+    description: 'تنبيه فوري عند وصول السعر إلى المستهدف المحدد في المراقبة أو الحاسبة أو الشارت',
     iconName: 'Target',
-    enabled: false, // مغلق افتراضياً
+    enabled: true,
     repeatMode: 'once',
     intervalSeconds: 60,
   },
   chartLines: {
     id: 'chartLines',
     name: 'تنبيه خطوط الشارت المرسومة',
-    description: 'تنبيه عند ملامسة السعر لأي خط أفقي مخصص مرسوم على شارت TradingView',
+    description: 'تنبيه عند ملامسة السعر لأي خط أفقي مخصص مرسوم على الشارت',
     iconName: 'Sliders',
-    enabled: false, // مغلق افتراضياً
+    enabled: true,
     repeatMode: 'once',
     intervalSeconds: 60,
   },
   trailingPeak: {
     id: 'trailingPeak',
-    name: 'تنبيه تراجع القمة (حماية الربح)',
-    description: 'تحذير عند تراجع السعر عن أعلى قمة حققها أثناء الصفقة لجني الأرباح فوراً',
+    name: 'تنبيه القمة وجني الأرباح',
+    description: 'تحذير عند اقتراب أو وصول السعر إلى القمة المستهدفة',
     iconName: 'AlertTriangle',
-    enabled: false, // مغلق افتراضياً
+    enabled: true,
     repeatMode: 'once',
     intervalSeconds: 60,
   },
   breakEvenStop: {
     id: 'breakEvenStop',
-    name: 'تنبيه كسر التعادل ووقف الخسارة',
-    description: 'تنبيه عند هبوط السعر تحت مستوى التعادل لتجنب تحمل خسائر في الصفقة',
+    name: 'تنبيه التعادل والمستويات المخصصة',
+    description: 'تنبيه عند تجاوز سعر مخصص أو مستوى التعادل',
     iconName: 'ShieldAlert',
-    enabled: false, // مغلق افتراضياً
+    enabled: true,
     repeatMode: 'once',
     intervalSeconds: 60,
   },
@@ -83,7 +84,6 @@ export const DEFAULT_ALERT_SETTINGS: AppAlertSettings = {
 export const STORAGE_KEY_APP_ALERT_SETTINGS = 'price_calc_v0_unified_alert_settings';
 export const STORAGE_KEY_ALERT_FIRING_HISTORY = 'price_calc_v0_alert_firing_history';
 
-// سجل زمني دائم لآخر إطلاق للتنبيهات للتحكم بالتكرار وحفظ الحالة عبر التحديث وإعادة الفتح
 const lastTriggerTimestamps = new Map<string, number>();
 const firedOnceSet = new Set<string>();
 
@@ -127,7 +127,6 @@ function saveFiringHistoryToStorage() {
   }
 }
 
-// تحميل السجل فورياً عند استدعاء الوحدة في المتصفح
 loadFiringHistoryFromStorage();
 
 type Listener = (settings: AppAlertSettings) => void;
@@ -139,7 +138,6 @@ export function getAlertSettings(): AppAlertSettings {
     const raw = localStorage.getItem(STORAGE_KEY_APP_ALERT_SETTINGS);
     if (!raw) return DEFAULT_ALERT_SETTINGS;
     const parsed = JSON.parse(raw);
-    // دمج الإعدادات المحفوظة مع الإعدادات الافتراضية لضمان وجود كافة المفاتيح
     return {
       bottomDetection: { ...DEFAULT_ALERT_SETTINGS.bottomDetection, ...(parsed.bottomDetection || {}) },
       reboundBounce: { ...DEFAULT_ALERT_SETTINGS.reboundBounce, ...(parsed.reboundBounce || {}) },
@@ -171,35 +169,31 @@ export function subscribeAlertSettings(fn: Listener): () => void {
 }
 
 /**
- * فحص ما إذا كان التنبيه مفعلاً ومسموحاً بإطلاقه الآن بناءً على خيارات التكرار
+ * فحص التكرار بالاعتماد على المعرف الفريد للتنبيه دون أي أقفال عامة مخفية تعطل الشاشات
  */
-export function canTriggerAlert(typeId: AlertTypeId, instanceId: string = 'global'): boolean {
+export function canTriggerAlert(
+  typeId: AlertTypeId,
+  instanceId: string = 'global',
+  overrideRepeatMode?: 'once' | 'continuous',
+  overrideIntervalSeconds?: number
+): boolean {
   const settings = getAlertSettings();
   const config = settings[typeId];
-  if (!config || !config.enabled) {
-    // التنبيه مغلق
-    return false;
-  }
+  const repeatMode = overrideRepeatMode || config?.repeatMode || 'once';
+  const intervalSeconds = overrideIntervalSeconds ?? config?.intervalSeconds ?? 60;
 
   const key = `${typeId}_${instanceId}`;
   const now = Date.now();
 
-  if (config.repeatMode === 'once') {
-    if (firedOnceSet.has(key)) {
-      return false; // أُطلق مرة واحدة بالفعل
-    }
-    return true;
+  if (repeatMode === 'once') {
+    return !firedOnceSet.has(key);
   }
 
-  // وضع التكرار باستمرار (continuous)
   const lastTime = lastTriggerTimestamps.get(key) || 0;
-  const intervalMs = (config.intervalSeconds || 60) * 1000;
+  const intervalMs = Math.max(5, intervalSeconds) * 1000;
   return now - lastTime >= intervalMs;
 }
 
-/**
- * تسجيل حدوث التنبيه لتطبيق قيود الفاصل الزمني والتكرار وحفظها دائمياً
- */
 export function recordAlertTriggered(typeId: AlertTypeId, instanceId: string = 'global'): void {
   const key = `${typeId}_${instanceId}`;
   firedOnceSet.add(key);
@@ -207,12 +201,25 @@ export function recordAlertTriggered(typeId: AlertTypeId, instanceId: string = '
   saveFiringHistoryToStorage();
 }
 
-/**
- * إعادة تعيين حالة التنبيه لعملة أو خط معين عند قيام المستخدم بتعديل التنبيه أو حذفه
- */
 export function resetAlertTrigger(typeId: AlertTypeId, instanceId: string = 'global'): void {
   const key = `${typeId}_${instanceId}`;
   firedOnceSet.delete(key);
   lastTriggerTimestamps.delete(key);
   saveFiringHistoryToStorage();
+}
+
+export function clearAllAlertFiringHistory(): void {
+  firedOnceSet.clear();
+  lastTriggerTimestamps.clear();
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(STORAGE_KEY_ALERT_FIRING_HISTORY);
+    } catch {
+      // Ignore
+    }
+  }
+}
+
+export function isAlertInstanceFiredOnce(typeId: AlertTypeId, instanceId: string): boolean {
+  return firedOnceSet.has(`${typeId}_${instanceId}`);
 }
